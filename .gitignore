@@ -1,0 +1,24 @@
+.DS_Store
+/build/
+/build-*/
+/out/
+/compile_commands.json
+*.o
+*.a
+*.so
+*.dylib
+*.core
+__pycache__/
+.cache/
+.env
+.env.*
+/.local/
+/results/raw/
+/results/private/
+/CMakeUserPresets.json
+
+# Keep project plans and teaching material local.
+*.md
+!/README.md
+/docs/
+/results/
