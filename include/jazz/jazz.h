@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "jazz/error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,13 +17,6 @@ extern "C" {
 enum jazz_mode { JAZZ_CM = 1, JAZZ_OOB = 2 };
 enum jazz_access { JAZZ_REMOTE_READ = 1, JAZZ_REMOTE_WRITE = 2 };
 enum { JAZZ_MESSAGE_MAX = 80, JAZZ_DESCRIPTOR_SIZE = 32 };
-
-struct jazz_error {
-    int code;
-    const char *stage; /* Static string; valid after the operation returns. */
-    int system_errno;
-    uint32_t wc_status;
-};
 
 struct jazz_config {
     enum jazz_mode mode;
