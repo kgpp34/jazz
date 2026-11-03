@@ -1,12 +1,12 @@
-#ifndef JAZZ_ENGINE_INTERNAL_H
-#define JAZZ_ENGINE_INTERNAL_H
-#include "jazz/engine.h"
+#ifndef JZ_ENGINE_INTERNAL_H
+#define JZ_ENGINE_INTERNAL_H
+#include "jz/engine.h"
 #include <infiniband/verbs.h>
 #include <stdbool.h>
 
-/* 窄测试接缝：只替换本阶段真实使用的设备调用，不模拟数据传输。
- * 返回值沿用 verbs/CM 契约；生产入口始终使用 jze_system_ops。 */
-struct jze_device_ops {
+/* Narrow test seam for device operations used in this stage; it does not simulate
+ * data transfers. Preserve verbs/CM return conventions. Production uses jz_rdma_system_ops. */
+struct jz_rdma_device_ops {
     struct ibv_context **(*cm_list)(int *count);
     void (*cm_free)(struct ibv_context **list);
     struct ibv_device **(*verbs_list)(int *count);
@@ -22,31 +22,31 @@ struct jze_device_ops {
     int (*dealloc_pd)(struct ibv_pd *);
 };
 
-struct jze_device {
-    char name[JAZZ_DEVICE_NAME_MAX];
+struct jz_rdma_device {
+    char name[JZ_RDMA_DEVICE_NAME_MAX];
     struct ibv_context *verbs;
-    struct ibv_pd *pd; /* Jazz 自有；绝不借用 CM 默认 PD。 */
+    struct ibv_pd *pd; /* Engine-owned; never borrow the CM default PD. */
     bool owned_context;
-    struct jazz_device_info info;
-    struct jazz_port_info *ports;
+    struct jz_rdma_device_info info;
+    struct jz_rdma_port_info *ports;
 };
 
-struct jazz_engine {
-    enum jazz_engine_state state;
+struct jz_engine {
+    enum jz_engine_state state;
     unsigned setup_modes;
     size_t device_count;
-    struct jze_device *devices;
-    const struct jze_device_ops *ops;
-    /* CM 列表使借用 context 保活；直到所有自有 PD 释放才归还。 */
+    struct jz_rdma_device *devices;
+    const struct jz_rdma_device_ops *ops;
+    /* The CM list pins borrowed contexts until all engine-owned PDs are released. */
     struct ibv_context **cm_contexts;
     struct ibv_device **verbs_devices;
 };
 
-extern const struct jze_device_ops jze_system_ops;
-int jze_fail(struct jazz_error *error, int errnum, const char *stage);
-int jze_engine_create(const struct jazz_engine_config *config,
-                      const struct jze_device_ops *ops,
-                      jazz_engine **out, struct jazz_error *error);
-int jze_devices_prepare(jazz_engine *engine, struct jazz_error *error);
-int jze_devices_release(jazz_engine *engine, struct jazz_error *error);
+extern const struct jz_rdma_device_ops jz_rdma_system_ops;
+int jz_engine_fail(struct jz_error *error, int errnum, const char *stage);
+int jz_engine_create_with_ops(const struct jz_engine_config *config,
+                      const struct jz_rdma_device_ops *ops,
+                      jz_engine **out, struct jz_error *error);
+int jz_rdma_devices_prepare(jz_engine *engine, struct jz_error *error);
+int jz_rdma_devices_release(jz_engine *engine, struct jz_error *error);
 #endif

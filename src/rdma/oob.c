@@ -4,7 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 
-static int select_device(jazz_connection *c, struct jazz_error *error)
+static int select_device(jz_connection *c, struct jz_error *error)
 {
     int count = 0;
     struct ibv_device **devices = ibv_get_device_list(&count);
@@ -45,7 +45,7 @@ static int exchange(int fd, enum jz_kind kind, void *outgoing, size_t out_length
     return rc;
 }
 
-static int handshake(jazz_connection *c, int fd, int64_t deadline, struct jazz_error *error)
+static int handshake(jz_connection *c, int fd, int64_t deadline, struct jz_error *error)
 {
     struct jz_hello local = { .qpn = c->qp->qp_num,
         .psn = (uint32_t)c->session & UINT32_C(0xffffff),
@@ -85,7 +85,7 @@ static int handshake(jazz_connection *c, int fd, int64_t deadline, struct jazz_e
     return 0;
 }
 
-int jz_oob_connect(jazz_connection *c, int64_t deadline, struct jazz_error *error)
+int jz_oob_connect(jz_connection *c, int64_t deadline, struct jz_error *error)
 {
     int rc = select_device(c, error);
     if (rc) return rc;
@@ -96,8 +96,8 @@ int jz_oob_connect(jazz_connection *c, int64_t deadline, struct jazz_error *erro
     return rc;
 }
 
-int jz_oob_accept(jazz_listener *l, jazz_connection *c, int64_t deadline,
-                  struct jazz_error *error)
+int jz_oob_accept(jz_listener *l, jz_connection *c, int64_t deadline,
+                  struct jz_error *error)
 {
     int fd = jz_socket_accept(l->fd, deadline);
     if (fd < 0) return jz_fail(error, fd, "oob-tcp-accept", -fd);

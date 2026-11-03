@@ -1,5 +1,8 @@
 FROM debian:bookworm-slim
 
+# Install development tools and RDMA userspace libraries without copying sources or docs.
+# Mount the project at /work; the Linux host supplies the kernel and devices.
+# Cache package downloads; retry transient mirror failures.
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt/lists \
     rm -f /etc/apt/apt.conf.d/docker-clean \
@@ -9,9 +12,11 @@ RUN --mount=type=cache,target=/var/cache/apt \
     libibverbs-dev librdmacm-dev ibverbs-providers ibverbs-utils \
     rdma-core iproute2 kmod ca-certificates
 
+# Debian packages the Clang sanitizer runtime separately from the compiler.
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt/lists \
     apt-get -o Acquire::Retries=3 install -y --no-install-recommends libclang-rt-dev
 
 WORKDIR /work
+# Open a shell by default without creating RXE devices or changing networking.
 CMD ["sh"]

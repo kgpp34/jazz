@@ -6,7 +6,7 @@
 int main(void)
 {
     uint8_t frame[JZ_FRAME_SIZE], copy[JZ_FRAME_SIZE];
-    uint8_t data[JAZZ_MESSAGE_MAX];
+    uint8_t data[JZ_MESSAGE_MAX];
     for (size_t i = 0; i < sizeof(data); ++i) data[i] = (uint8_t)i;
     for (size_t n = 0; n <= sizeof(data); ++n) {
         CHECK(jz_frame_encode(frame, JZ_MESSAGE, data, n) == 0);
@@ -22,7 +22,7 @@ int main(void)
             copy[i] ^= 0x80;
             CHECK(jz_frame_decode(copy, sizeof(copy), JZ_MESSAGE, &payload, &length) == -EPROTO);
         }
-        if (n < JAZZ_MESSAGE_MAX) {
+        if (n < JZ_MESSAGE_MAX) {
             memcpy(copy, frame, sizeof(copy)); copy[16 + n] = 1;
             CHECK(jz_frame_decode(copy, sizeof(copy), JZ_MESSAGE, &payload, &length) == -EPROTO);
         }
@@ -41,16 +41,16 @@ int main(void)
     CHECK(jz_range_valid(UINT64_MAX, UINT64_MAX - 1, 1));
     CHECK(!jz_range_valid(16, UINT64_MAX, 2));
     CHECK(!jz_range_valid(16, 1, UINT64_MAX));
-    struct jazz_remote_region region = { .address = 0x10203040, .length = 4096,
-        .rkey = 0xdeadbeef, .access = JAZZ_REMOTE_READ | JAZZ_REMOTE_WRITE, .session = 42 };
-    struct jazz_remote_region region2;
-    uint8_t descriptor[JAZZ_DESCRIPTOR_SIZE];
-    CHECK(jazz_descriptor_encode(&region, descriptor) == 0);
-    CHECK(jazz_descriptor_decode(descriptor, sizeof(descriptor), &region2) == 0);
+    struct jz_remote_region region = { .address = 0x10203040, .length = 4096,
+        .rkey = 0xdeadbeef, .access = JZ_REMOTE_READ | JZ_REMOTE_WRITE, .session = 42 };
+    struct jz_remote_region region2;
+    uint8_t descriptor[JZ_DESCRIPTOR_SIZE];
+    CHECK(jz_descriptor_encode(&region, descriptor) == 0);
+    CHECK(jz_descriptor_decode(descriptor, sizeof(descriptor), &region2) == 0);
     CHECK(region2.address == region.address && region2.rkey == region.rkey && region2.session == 42);
     jz_put64(descriptor, UINT64_MAX);
-    CHECK(jazz_descriptor_decode(descriptor, sizeof(descriptor), &region2) == -EPROTO);
+    CHECK(jz_descriptor_decode(descriptor, sizeof(descriptor), &region2) == -EPROTO);
     region.address = 1; region.access = 128;
-    CHECK(jazz_descriptor_encode(&region, descriptor) == -EINVAL);
+    CHECK(jz_descriptor_encode(&region, descriptor) == -EINVAL);
     return 0;
 }

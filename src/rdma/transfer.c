@@ -5,8 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-int jz_wait_send(jazz_connection *c, uint64_t id, enum ibv_wc_opcode opcode,
-                 int64_t deadline, struct jazz_error *error)
+int jz_wait_send(jz_connection *c, uint64_t id, enum ibv_wc_opcode opcode,
+                 int64_t deadline, struct jz_error *error)
 {
     for (;;) {
         struct ibv_wc wc;
@@ -30,20 +30,20 @@ int jz_wait_send(jazz_connection *c, uint64_t id, enum ibv_wc_opcode opcode,
     }
 }
 
-int jazz_region_register(jazz_connection *c, void *buffer, size_t length,
-                         unsigned access, jazz_region **out, struct jazz_error *error)
+int jz_region_register(jz_connection *c, void *buffer, size_t length,
+                         unsigned access, jz_region **out, struct jz_error *error)
 {
     jz_clear_error(error);
     if (!c || !c->ready || !buffer || !length || !out || *out ||
         (uintptr_t)buffer > UINTPTR_MAX - length ||
-        (access & ~(unsigned)(JAZZ_REMOTE_READ | JAZZ_REMOTE_WRITE)))
+        (access & ~(unsigned)(JZ_REMOTE_READ | JZ_REMOTE_WRITE)))
         return jz_fail(error, -EINVAL, "register-arguments", 0);
     if (c->region_count >= JZ_MAX_REGIONS) return jz_fail(error, -ENOSPC, "region-budget", 0);
-    jazz_region *r = calloc(1, sizeof(*r));
+    jz_region *r = calloc(1, sizeof(*r));
     if (!r) return jz_fail(error, -ENOMEM, "region-allocate", errno);
     unsigned flags = IBV_ACCESS_LOCAL_WRITE;
-    if (access & JAZZ_REMOTE_READ) flags |= IBV_ACCESS_REMOTE_READ;
-    if (access & JAZZ_REMOTE_WRITE) flags |= IBV_ACCESS_REMOTE_WRITE;
+    if (access & JZ_REMOTE_READ) flags |= IBV_ACCESS_REMOTE_READ;
+    if (access & JZ_REMOTE_WRITE) flags |= IBV_ACCESS_REMOTE_WRITE;
     r->mr = ibv_reg_mr(c->pd, buffer, length, flags);
     if (!r->mr) {
         int saved = errno;
@@ -60,19 +60,19 @@ int jazz_region_register(jazz_connection *c, void *buffer, size_t length,
     return 0;
 }
 
-int jazz_region_unregister(jazz_region **region, struct jazz_error *error)
+int jz_region_unregister(jz_region **region, struct jz_error *error)
 {
     jz_clear_error(error);
     if (!region) return jz_fail(error, -EINVAL, "unregister-arguments", 0);
-    jazz_region *r = *region;
+    jz_region *r = *region;
     if (!r) return 0;
     if (r->busy) return jz_fail(error, -EBUSY, "region-in-flight", 0);
     if (r->access && r->connection->qp)
         return jz_fail(error, -EBUSY, "quiesce-before-remote-region-release", 0);
     int rc = ibv_dereg_mr(r->mr);
     if (rc) return jz_fail(error, -rc, "deregister-memory", rc);
-    jazz_connection *c = r->connection;
-    jazz_region **entry = &c->regions;
+    jz_connection *c = r->connection;
+    jz_region **entry = &c->regions;
     while (*entry != r) entry = &(*entry)->next;
     *entry = r->next;
     --c->region_count;
@@ -81,23 +81,23 @@ int jazz_region_unregister(jazz_region **region, struct jazz_error *error)
     return 0;
 }
 
-int jazz_region_export(const jazz_region *r, struct jazz_remote_region *out,
-                       struct jazz_error *error)
+int jz_region_export(const jz_region *r, struct jz_remote_region *out,
+                       struct jz_error *error)
 {
     jz_clear_error(error);
     if (!r || !out || !r->connection->ready) return jz_fail(error, -EINVAL, "export-arguments", 0);
-    *out = (struct jazz_remote_region){ .address = (uint64_t)(uintptr_t)r->mr->addr,
+    *out = (struct jz_remote_region){ .address = (uint64_t)(uintptr_t)r->mr->addr,
         .length = r->length, .rkey = r->mr->rkey, .access = r->access,
         .session = r->connection->session };
     return 0;
 }
 
-int jazz_send_message(jazz_connection *c, const void *data, size_t length,
-                      struct jazz_error *error)
+int jz_send_message(jz_connection *c, const void *data, size_t length,
+                      struct jz_error *error)
 {
     jz_clear_error(error);
     if (!c || !c->ready || (length && !data)) return jz_fail(error, -EINVAL, "send-message-arguments", 0);
-    if (length > JAZZ_MESSAGE_MAX) return jz_fail(error, -EMSGSIZE, "control-message-limit", 0);
+    if (length > JZ_MESSAGE_MAX) return jz_fail(error, -EMSGSIZE, "control-message-limit", 0);
     (void)jz_frame_encode(c->send_buffer, JZ_MESSAGE, data, length);
     struct ibv_sge sge = { .addr = (uint64_t)(uintptr_t)c->send_buffer,
                            .length = JZ_FRAME_SIZE, .lkey = c->send_mr->lkey };
@@ -111,11 +111,11 @@ int jazz_send_message(jazz_connection *c, const void *data, size_t length,
     return rc ? jz_abort(c, rc) : 0;
 }
 
-int jazz_receive_message(jazz_connection *c, void *data, size_t capacity,
-                         size_t *length, struct jazz_error *error)
+int jz_receive_message(jz_connection *c, void *data, size_t capacity,
+                         size_t *length, struct jz_error *error)
 {
     jz_clear_error(error);
-    if (!c || !c->ready || !data || !length || capacity < JAZZ_MESSAGE_MAX)
+    if (!c || !c->ready || !data || !length || capacity < JZ_MESSAGE_MAX)
         return jz_fail(error, -EINVAL, "receive-message-arguments", 0);
     int64_t deadline = jz_now_ms() + c->options.timeout_ms;
     for (;;) {
@@ -146,15 +146,15 @@ int jazz_receive_message(jazz_connection *c, void *data, size_t capacity,
     return rc ? jz_abort(c, rc) : 0;
 }
 
-static int transfer(jazz_connection *c, jazz_region *local, size_t local_offset,
-                      const struct jazz_remote_region *remote, uint64_t remote_offset,
-                      size_t length, bool read, struct jazz_error *error)
+static int transfer(jz_connection *c, jz_region *local, size_t local_offset,
+                      const struct jz_remote_region *remote, uint64_t remote_offset,
+                      size_t length, bool read, struct jz_error *error)
 {
     jz_clear_error(error);
     if (!c || !c->ready || !local || local->connection != c || !remote || !length || local->busy)
         return jz_fail(error, -EINVAL, "transfer-arguments", 0);
     if (remote->session != c->peer_session) return jz_fail(error, -ESTALE, "remote-session", 0);
-    unsigned permission = read ? JAZZ_REMOTE_READ : JAZZ_REMOTE_WRITE;
+    unsigned permission = read ? JZ_REMOTE_READ : JZ_REMOTE_WRITE;
     if (!(remote->access & permission)) return jz_fail(error, -EACCES, "remote-permission", 0);
     if (remote->address > UINT64_MAX - remote->length ||
         !jz_range_valid(local->length, local_offset, length) ||
@@ -181,16 +181,16 @@ static int transfer(jazz_connection *c, jazz_region *local, size_t local_offset,
     return 0;
 }
 
-int jazz_write(jazz_connection *c, jazz_region *local, size_t local_offset,
-               const struct jazz_remote_region *remote, uint64_t remote_offset,
-               size_t length, struct jazz_error *error)
+int jz_write(jz_connection *c, jz_region *local, size_t local_offset,
+               const struct jz_remote_region *remote, uint64_t remote_offset,
+               size_t length, struct jz_error *error)
 {
     return transfer(c, local, local_offset, remote, remote_offset, length, false, error);
 }
 
-int jazz_read(jazz_connection *c, jazz_region *local, size_t local_offset,
-              const struct jazz_remote_region *remote, uint64_t remote_offset,
-              size_t length, struct jazz_error *error)
+int jz_read(jz_connection *c, jz_region *local, size_t local_offset,
+              const struct jz_remote_region *remote, uint64_t remote_offset,
+              size_t length, struct jz_error *error)
 {
     return transfer(c, local, local_offset, remote, remote_offset, length, true, error);
 }

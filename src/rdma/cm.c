@@ -6,15 +6,15 @@
 
 /* Private data binds peer descriptors to this connection incarnation.
  * It is copied before acknowledging its CM event; no event pointer escapes. */
-static void private_encode(jazz_connection *c, uint8_t out[16])
+static void private_encode(jz_connection *c, uint8_t out[16])
 {
     jz_put32(out, UINT32_C(0x4a434d31));
     jz_put32(out + 4, 1);
     jz_put64(out + 8, c->session);
 }
 
-static int private_decode(jazz_connection *c, const struct rdma_cm_event *event,
-                           struct jazz_error *error)
+static int private_decode(jz_connection *c, const struct rdma_cm_event *event,
+                           struct jz_error *error)
 {
     const uint8_t *bytes = event->param.conn.private_data;
     if (!bytes || event->param.conn.private_data_len < 16 ||
@@ -25,7 +25,7 @@ static int private_decode(jazz_connection *c, const struct rdma_cm_event *event,
     return 0;
 }
 
-static int new_channel(struct rdma_event_channel **out, struct jazz_error *error)
+static int new_channel(struct rdma_event_channel **out, struct jz_error *error)
 {
     *out = rdma_create_event_channel();
     if (!*out) return jz_fail(error, -errno, "cm-event-channel", errno);
@@ -34,7 +34,7 @@ static int new_channel(struct rdma_event_channel **out, struct jazz_error *error
 }
 
 static int next_event(struct rdma_event_channel *channel, int64_t deadline,
-                       struct rdma_cm_event **out, struct jazz_error *error)
+                       struct rdma_cm_event **out, struct jz_error *error)
 {
     for (;;) {
         int rc = jz_wait_fd(channel->fd, POLLIN, deadline);
@@ -45,8 +45,8 @@ static int next_event(struct rdma_event_channel *channel, int64_t deadline,
     }
 }
 
-static int expect_event(jazz_connection *c, enum rdma_cm_event_type expected,
-                         int64_t deadline, struct jazz_error *error)
+static int expect_event(jz_connection *c, enum rdma_cm_event_type expected,
+                         int64_t deadline, struct jz_error *error)
 {
     struct rdma_cm_event *event = NULL;
     int rc = next_event(c->channel, deadline, &event, error);
@@ -60,7 +60,7 @@ static int expect_event(jazz_connection *c, enum rdma_cm_event_type expected,
     return rc;
 }
 
-int jz_cm_listen(jazz_listener *l, struct jazz_error *error)
+int jz_cm_listen(jz_listener *l, struct jz_error *error)
 {
     int rc = new_channel(&l->channel, error);
     if (rc) return rc;
@@ -73,7 +73,7 @@ int jz_cm_listen(jazz_listener *l, struct jazz_error *error)
     return 0;
 }
 
-int jz_cm_connect(jazz_connection *c, int64_t deadline, struct jazz_error *error)
+int jz_cm_connect(jz_connection *c, int64_t deadline, struct jz_error *error)
 {
     int rc = new_channel(&c->channel, error);
     if (rc) return rc;
@@ -104,8 +104,8 @@ int jz_cm_connect(jazz_connection *c, int64_t deadline, struct jazz_error *error
     return expect_event(c, RDMA_CM_EVENT_ESTABLISHED, deadline, error);
 }
 
-int jz_cm_accept(jazz_listener *l, jazz_connection *c, int64_t deadline,
-                 struct jazz_error *error)
+int jz_cm_accept(jz_listener *l, jz_connection *c, int64_t deadline,
+                 struct jz_error *error)
 {
     struct rdma_cm_event *event = NULL;
     int rc = next_event(l->channel, deadline, &event, error);

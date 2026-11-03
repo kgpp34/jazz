@@ -7,31 +7,31 @@
 #include <sys/random.h>
 #include <unistd.h>
 
-void jz_clear_error(struct jazz_error *error)
+void jz_clear_error(struct jz_error *error)
 {
-    if (error) *error = (struct jazz_error){0};
+    if (error) *error = (struct jz_error){0};
 }
 
-int jz_fail(struct jazz_error *error, int code, const char *stage, int sys)
+int jz_fail(struct jz_error *error, int code, const char *stage, int sys)
 {
-    if (error) *error = (struct jazz_error){ .code = code, .stage = stage,
+    if (error) *error = (struct jz_error){ .code = code, .stage = stage,
                                            .system_errno = sys };
     return code;
 }
 
-void jazz_config_init(struct jazz_config *config)
+void jz_config_init(struct jz_config *config)
 {
-    if (config) *config = (struct jazz_config){ .mode = JAZZ_CM,
+    if (config) *config = (struct jz_config){ .mode = JZ_CM,
                                                .gid_index = -1, .timeout_ms = 5000 };
 }
 
-int jz_options(const struct jazz_config *config, bool client,
-               struct jz_options *out, struct jazz_error *error)
+int jz_options(const struct jz_config *config, bool client,
+               struct jz_options *out, struct jz_error *error)
 {
-    if (!config || !out || (config->mode != JAZZ_CM && config->mode != JAZZ_OOB) ||
+    if (!config || !out || (config->mode != JZ_CM && config->mode != JZ_OOB) ||
         !config->timeout_ms || config->timeout_ms > INT_MAX || config->gid_index < -1 ||
         config->gid_index > 255 || (client && !config->port) ||
-        (config->mode == JAZZ_CM && (config->gid_index != -1 || config->ib_port)))
+        (config->mode == JZ_CM && (config->gid_index != -1 || config->ib_port)))
         return jz_fail(error, -EINVAL, "config", 0);
     *out = (struct jz_options){ .mode = config->mode, .ib_port = config->ib_port,
                                .gid_index = config->gid_index,
@@ -47,10 +47,10 @@ int jz_options(const struct jazz_config *config, bool client,
     return 0;
 }
 
-int jz_new_connection(const struct jz_options *options, jazz_connection **out,
-                      struct jazz_error *error)
+int jz_new_connection(const struct jz_options *options, jz_connection **out,
+                      struct jz_error *error)
 {
-    jazz_connection *c = calloc(1, sizeof(*c));
+    jz_connection *c = calloc(1, sizeof(*c));
     if (!c) return jz_fail(error, -ENOMEM, "connection-allocate", errno);
     c->options = *options;
     ssize_t n;
@@ -64,7 +64,7 @@ int jz_new_connection(const struct jz_options *options, jazz_connection **out,
     return 0;
 }
 
-int jz_validate_port(jazz_connection *c, struct jazz_error *error)
+int jz_validate_port(jz_connection *c, struct jz_error *error)
 {
     if (ibv_query_port(c->context, c->ib_port, &c->port_attr))
         return jz_fail(error, -EIO, "query-port", errno);
@@ -91,7 +91,7 @@ int jz_validate_port(jazz_connection *c, struct jazz_error *error)
     return jz_fail(error, -EADDRNOTAVAIL, "matching-rocev2-gid", 0);
 }
 
-int jz_post_receive(jazz_connection *c, struct jazz_error *error)
+int jz_post_receive(jz_connection *c, struct jz_error *error)
 {
     struct ibv_sge sge = { .addr = (uint64_t)(uintptr_t)c->recv_buffer,
                            .length = JZ_FRAME_SIZE, .lkey = c->recv_mr->lkey };
@@ -101,7 +101,7 @@ int jz_post_receive(jazz_connection *c, struct jazz_error *error)
     return rc ? jz_fail(error, -rc, "post-control-receive", rc) : 0;
 }
 
-int jz_resources(jazz_connection *c, bool cm, struct jazz_error *error)
+int jz_resources(jz_connection *c, bool cm, struct jz_error *error)
 {
     struct ibv_device_attr device;
     if (ibv_query_device(c->context, &device)) return jz_fail(error, -EIO, "query-device", errno);
@@ -137,7 +137,7 @@ int jz_resources(jazz_connection *c, bool cm, struct jazz_error *error)
     return jz_post_receive(c, error);
 }
 
-static int validate_connected_qp(jazz_connection *c, struct jazz_error *error)
+static int validate_connected_qp(jz_connection *c, struct jz_error *error)
 {
     struct ibv_qp_attr attr = {0};
     struct ibv_qp_init_attr init = {0};
@@ -155,50 +155,50 @@ static int validate_connected_qp(jazz_connection *c, struct jazz_error *error)
     return 0;
 }
 
-int jazz_listen(const struct jazz_config *config, jazz_listener **out,
-                struct jazz_error *error)
+int jz_listen(const struct jz_config *config, jz_listener **out,
+                struct jz_error *error)
 {
     jz_clear_error(error);
     if (!out || *out) return jz_fail(error, -EINVAL, "listener-output", 0);
     struct jz_options options;
     int rc = jz_options(config, false, &options, error);
     if (rc) return rc;
-    jazz_listener *l = calloc(1, sizeof(*l));
+    jz_listener *l = calloc(1, sizeof(*l));
     if (!l) return jz_fail(error, -ENOMEM, "listener-allocate", errno);
     l->fd = -1;
     l->options = options;
-    if (options.mode == JAZZ_CM) rc = jz_cm_listen(l, error);
+    if (options.mode == JZ_CM) rc = jz_cm_listen(l, error);
     else {
         l->fd = jz_socket_listen(&options.local, &l->port);
         if (l->fd < 0) rc = jz_fail(error, l->fd, "oob-listen", -l->fd);
     }
     if (rc) {
-        if (jazz_listener_close(&l, NULL)) *out = l;
+        if (jz_listener_close(&l, NULL)) *out = l;
         return rc;
     }
     *out = l;
     return 0;
 }
 
-uint16_t jazz_listener_port(const jazz_listener *listener)
+uint16_t jz_listener_port(const jz_listener *listener)
 {
     return listener ? listener->port : 0;
 }
 
-int jazz_accept(jazz_listener *l, jazz_connection **out, struct jazz_error *error)
+int jz_accept(jz_listener *l, jz_connection **out, struct jz_error *error)
 {
     jz_clear_error(error);
     if (!l || !out || *out) return jz_fail(error, -EINVAL, "accept-arguments", 0);
-    jazz_connection *c = NULL;
+    jz_connection *c = NULL;
     int rc = jz_new_connection(&l->options, &c, error);
     if (rc) return rc;
     int64_t deadline = jz_now_ms() + l->options.timeout_ms;
-    rc = l->options.mode == JAZZ_CM ? jz_cm_accept(l, c, deadline, error)
+    rc = l->options.mode == JZ_CM ? jz_cm_accept(l, c, deadline, error)
                                    : jz_oob_accept(l, c, deadline, error);
     if (!rc) rc = validate_connected_qp(c, error);
     if (rc) {
         /* Return the handle if provider cleanup fails: ownership is never lost. */
-        if (jazz_connection_close(&c, NULL)) *out = c;
+        if (jz_connection_close(&c, NULL)) *out = c;
         return rc;
     }
     c->ready = true;
@@ -206,23 +206,23 @@ int jazz_accept(jazz_listener *l, jazz_connection **out, struct jazz_error *erro
     return 0;
 }
 
-int jazz_connect(const struct jazz_config *config, jazz_connection **out,
-                 struct jazz_error *error)
+int jz_connect(const struct jz_config *config, jz_connection **out,
+                 struct jz_error *error)
 {
     jz_clear_error(error);
     if (!out || *out) return jz_fail(error, -EINVAL, "connection-output", 0);
     struct jz_options options;
     int rc = jz_options(config, true, &options, error);
     if (rc) return rc;
-    jazz_connection *c = NULL;
+    jz_connection *c = NULL;
     rc = jz_new_connection(&options, &c, error);
     if (rc) return rc;
     int64_t deadline = jz_now_ms() + options.timeout_ms;
-    rc = options.mode == JAZZ_CM ? jz_cm_connect(c, deadline, error)
+    rc = options.mode == JZ_CM ? jz_cm_connect(c, deadline, error)
                                 : jz_oob_connect(c, deadline, error);
     if (!rc) rc = validate_connected_qp(c, error);
     if (rc) {
-        if (jazz_connection_close(&c, NULL)) *out = c;
+        if (jz_connection_close(&c, NULL)) *out = c;
         return rc;
     }
     c->ready = true;
@@ -230,7 +230,7 @@ int jazz_connect(const struct jazz_config *config, jazz_connection **out,
     return 0;
 }
 
-int jazz_connection_quiesce(jazz_connection *c, struct jazz_error *error)
+int jz_connection_quiesce(jz_connection *c, struct jz_error *error)
 {
     jz_clear_error(error);
     if (!c) return jz_fail(error, -EINVAL, "quiesce-arguments", 0);
@@ -245,17 +245,17 @@ int jazz_connection_quiesce(jazz_connection *c, struct jazz_error *error)
         c->qp = NULL;
         if (c->id) c->id->qp = NULL;
     }
-    for (jazz_region *r = c->regions; r; r = r->next) r->busy = false;
+    for (jz_region *r = c->regions; r; r = r->next) r->busy = false;
     return 0;
 }
 
-int jazz_connection_close(jazz_connection **connection, struct jazz_error *error)
+int jz_connection_close(jz_connection **connection, struct jz_error *error)
 {
     jz_clear_error(error);
     if (!connection) return jz_fail(error, -EINVAL, "close-arguments", 0);
-    jazz_connection *c = *connection;
+    jz_connection *c = *connection;
     if (!c) return 0;
-    int rc = jazz_connection_quiesce(c, error);
+    int rc = jz_connection_quiesce(c, error);
     if (rc) return rc;
     if (c->regions) return jz_fail(error, -EBUSY, "registered-regions-remain", 0);
 #define JZ_RELEASE(field, call, stage_name) do { \
@@ -281,11 +281,11 @@ int jazz_connection_close(jazz_connection **connection, struct jazz_error *error
     return 0;
 }
 
-int jazz_listener_close(jazz_listener **listener, struct jazz_error *error)
+int jz_listener_close(jz_listener **listener, struct jz_error *error)
 {
     jz_clear_error(error);
     if (!listener) return jz_fail(error, -EINVAL, "listener-close-arguments", 0);
-    jazz_listener *l = *listener;
+    jz_listener *l = *listener;
     if (!l) return 0;
     if (l->id && rdma_destroy_id(l->id)) return jz_fail(error, -errno, "destroy-listener-id", errno);
     if (l->channel) rdma_destroy_event_channel(l->channel);
@@ -295,8 +295,8 @@ int jazz_listener_close(jazz_listener **listener, struct jazz_error *error)
     return 0;
 }
 
-int jz_abort(jazz_connection *c, int result)
+int jz_abort(jz_connection *c, int result)
 {
-    (void)jazz_connection_quiesce(c, NULL);
+    (void)jz_connection_quiesce(c, NULL);
     return result;
 }

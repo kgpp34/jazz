@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real RDMA integration, opt in with JAZZ_TEST_IP; never emulate verbs."""
+"""Real RDMA integration, opt in with JZ_TEST_IP; never emulate verbs."""
 import argparse
 import os
 import selectors
@@ -54,7 +54,7 @@ def roundtrip(binary, mode, ip, size, timeout=False):
 def malformed(binary, ip):
     for name, payload in (
         ("bad-version", struct.pack("!IIII", 0x4A415A5A, 99, 1, 40) + bytes(80)),
-        ("truncated", b"JAZZ"),
+        ("truncated", struct.pack("!I", 0x4A415A5A)),
         ("silent-peer", None),
     ):
         server, port = launch_server(binary, "oob", ip, 1)
@@ -90,9 +90,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
     args = parser.parse_args()
-    ip = os.environ.get("JAZZ_TEST_IP")
+    ip = os.environ.get("JZ_TEST_IP")
     if not ip:
-        print("SKIP: set JAZZ_TEST_IP to a local IPv4 backed by an active RoCEv2 device")
+        print("SKIP: set JZ_TEST_IP to a local IPv4 backed by an active RoCEv2 device")
         return 77
     for mode in ("cm", "oob"):
         for _ in range(2):

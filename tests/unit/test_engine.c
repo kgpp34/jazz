@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 两个假设备只验证资源所有权/失败，不宣称执行真实 verbs 或多 RNIC 数据传输。 */
+/* Two fake devices validate ownership and failures, not real verbs or multi-NIC transfers. */
 static struct ibv_device devices[2];
 static struct ibv_context contexts[2];
 static struct ibv_device *device_list[] = { &devices[0], &devices[1], NULL };
@@ -73,7 +73,7 @@ static int query_gid(struct ibv_context *context, uint32_t port, uint32_t gid,
     (void)context; (void)flags;
     CHECK(port == 1 && gid < 3);
     if (fail_query == 3) return EACCES;
-    if (!gid) return ENODATA; /* 合法的空槽不能当成整个查询失败。 */
+    if (!gid) return ENODATA; /* An empty GID slot must not fail the entire device query. */
     entry->gid_type = gid == 1 || fail_query == 5 ? IBV_GID_TYPE_ROCE_V1 : IBV_GID_TYPE_ROCE_V2;
     entry->gid.global.interface_id = 1;
     return 0;
@@ -96,140 +96,140 @@ static int dealloc_pd(struct ibv_pd *pd)
     free(pd);
     return 0;
 }
-static const struct jze_device_ops fake_ops = {
+static const struct jz_rdma_device_ops fake_ops = {
     .cm_list = cm_list, .cm_free = cm_free, .verbs_list = verbs_list,
     .verbs_free = verbs_free, .name = device_name, .open = open_device,
     .close = close_device, .query_device = query_device, .query_port = query_port,
     .query_gid = query_gid, .alloc_pd = alloc_pd, .dealloc_pd = dealloc_pd
 };
 
-static jazz_engine *create(unsigned modes)
+static jz_engine *create(unsigned modes)
 {
-    struct jazz_engine_config config;
-    jazz_engine_config_init(&config);
+    struct jz_engine_config config;
+    jz_engine_config_init(&config);
     config.setup_modes = modes;
     config.devices = names;
     config.device_count = 2;
-    jazz_engine *engine = NULL;
-    CHECK(jze_engine_create(&config, &fake_ops, &engine, NULL) == 0);
+    jz_engine *engine = NULL;
+    CHECK(jz_engine_create_with_ops(&config, &fake_ops, &engine, NULL) == 0);
     CHECK(enumerations == 0 && allocations == 0);
     return engine;
 }
-static enum jazz_engine_state state(jazz_engine *engine)
+static enum jz_engine_state state(jz_engine *engine)
 {
-    enum jazz_engine_state result;
-    CHECK(jazz_engine_get_state(engine, &result) == 0);
+    enum jz_engine_state result;
+    CHECK(jz_engine_get_state(engine, &result) == 0);
     return result;
 }
 
 static void normal(unsigned modes)
 {
     reset();
-    jazz_engine *engine = create(modes);
-    struct jazz_device_info info = {0};
-    CHECK(jazz_engine_query_device(engine, 0, &info, NULL) == -EAGAIN);
-    CHECK(jazz_engine_prepare(engine, NULL) == 0);
-    CHECK(state(engine) == JAZZ_ENGINE_READY && live_pds == 2);
+    jz_engine *engine = create(modes);
+    struct jz_rdma_device_info info = {0};
+    CHECK(jz_rdma_query_device(engine, 0, &info, NULL) == -EAGAIN);
+    CHECK(jz_engine_prepare(engine, NULL) == 0);
+    CHECK(state(engine) == JZ_ENGINE_READY && live_pds == 2);
     CHECK(engine->devices[0].pd->context == &contexts[0]);
     CHECK(engine->devices[0].pd != engine->devices[1].pd);
-    CHECK(jazz_engine_prepare(engine, NULL) == -EALREADY);
-    CHECK(jazz_engine_query_device(engine, 0, &info, NULL) == 0);
+    CHECK(jz_engine_prepare(engine, NULL) == -EALREADY);
+    CHECK(jz_rdma_query_device(engine, 0, &info, NULL) == 0);
     CHECK(!strcmp(info.name, "fake0") && info.guid == 123 && info.max_read_outstanding == 4);
     info.name[0] = 'x';
-    CHECK(jazz_engine_query_device(engine, 0, &info, NULL) == 0 && info.name[0] == 'f');
-    CHECK(jazz_engine_query_device(engine, 2, &info, NULL) == -ERANGE);
-    struct jazz_port_info port;
-    CHECK(jazz_engine_query_port(engine, 0, 1, &port, NULL) == 0);
+    CHECK(jz_rdma_query_device(engine, 0, &info, NULL) == 0 && info.name[0] == 'f');
+    CHECK(jz_rdma_query_device(engine, 2, &info, NULL) == -ERANGE);
+    struct jz_rdma_port_info port;
+    CHECK(jz_rdma_query_port(engine, 0, 1, &port, NULL) == 0);
     CHECK(port.active_mtu == 1024 && port.roce_v2_gid_count == 1);
-    CHECK(jazz_engine_query_port(engine, 0, 0, &port, NULL) == -ERANGE);
-    CHECK(jazz_engine_destroy(&engine, NULL) == 0 && !engine);
-    CHECK(jazz_engine_destroy(&engine, NULL) == 0);
+    CHECK(jz_rdma_query_port(engine, 0, 0, &port, NULL) == -ERANGE);
+    CHECK(jz_engine_destroy(&engine, NULL) == 0 && !engine);
+    CHECK(jz_engine_destroy(&engine, NULL) == 0);
     CHECK(!live_pds && list_releases == 1);
-    CHECK(opens == ((modes & JAZZ_SETUP_CM) ? 0 : 2) && closes == opens);
+    CHECK(opens == ((modes & JZ_RDMA_SETUP_CM) ? 0 : 2) && closes == opens);
 }
 
 static void failures(unsigned modes)
 {
-    /* 各阶段失败都应回到 CREATED，并允许再次 prepare。 */
+    /* Preparation failures roll back to CREATED and allow another prepare. */
     for (int fault = 1; fault <= 5; ++fault) {
         reset();
-        jazz_engine *engine = create(modes);
+        jz_engine *engine = create(modes);
         fail_query = fault;
-        struct jazz_error error;
-        CHECK(jazz_engine_prepare(engine, &error) < 0 && error.code < 0);
-        CHECK(state(engine) == JAZZ_ENGINE_CREATED && !live_pds && list_releases == 1);
+        struct jz_error error;
+        CHECK(jz_engine_prepare(engine, &error) < 0 && error.code < 0);
+        CHECK(state(engine) == JZ_ENGINE_CREATED && !live_pds && list_releases == 1);
         fail_query = 0;
-        CHECK(jazz_engine_prepare(engine, NULL) == 0);
-        CHECK(jazz_engine_destroy(&engine, NULL) == 0);
+        CHECK(jz_engine_prepare(engine, NULL) == 0);
+        CHECK(jz_engine_destroy(&engine, NULL) == 0);
         CHECK(list_releases == 2 && opens == closes);
     }
     reset();
-    jazz_engine *engine = create(modes);
+    jz_engine *engine = create(modes);
     fail_alloc_at = 2;
     fail_pd_free = 1;
-    struct jazz_error error;
-    CHECK(jazz_engine_prepare(engine, &error) == -ENOMEM);
+    struct jz_error error;
+    CHECK(jz_engine_prepare(engine, &error) == -ENOMEM);
     CHECK(!strcmp(error.stage, "allocate-pd"));
-    CHECK(state(engine) == JAZZ_ENGINE_CLEANUP_REQUIRED && live_pds == 1);
-    CHECK(list_releases == 0); /* 父 provider 引用不能先释放。 */
-    CHECK(jazz_engine_prepare(engine, NULL) == -EBUSY);
-    CHECK(jazz_engine_destroy(&engine, &error) == -EBUSY && engine);
+    CHECK(state(engine) == JZ_ENGINE_CLEANUP_REQUIRED && live_pds == 1);
+    CHECK(list_releases == 0); /* Do not release the parent provider reference first. */
+    CHECK(jz_engine_prepare(engine, NULL) == -EBUSY);
+    CHECK(jz_engine_destroy(&engine, &error) == -EBUSY && engine);
     CHECK(!strcmp(error.stage, "deallocate-pd"));
     fail_pd_free = 0;
-    CHECK(jazz_engine_destroy(&engine, NULL) == 0 && !engine);
+    CHECK(jz_engine_destroy(&engine, NULL) == 0 && !engine);
     CHECK(list_releases == 1 && !live_pds && opens == closes);
 
     reset();
     engine = create(modes);
     empty = 1;
-    CHECK(jazz_engine_prepare(engine, &error) == -ENODEV);
-    CHECK(state(engine) == JAZZ_ENGINE_CREATED && list_releases == 1);
-    CHECK(jazz_engine_destroy(&engine, NULL) == 0);
+    CHECK(jz_engine_prepare(engine, &error) == -ENODEV);
+    CHECK(state(engine) == JZ_ENGINE_CREATED && list_releases == 1);
+    CHECK(jz_engine_destroy(&engine, NULL) == 0);
 }
 
 int main(void)
 {
-    normal(JAZZ_SETUP_CM | JAZZ_SETUP_OOB);
-    normal(JAZZ_SETUP_CM);
-    normal(JAZZ_SETUP_OOB);
-    failures(JAZZ_SETUP_CM | JAZZ_SETUP_OOB);
-    failures(JAZZ_SETUP_OOB);
+    normal(JZ_RDMA_SETUP_CM | JZ_RDMA_SETUP_OOB);
+    normal(JZ_RDMA_SETUP_CM);
+    normal(JZ_RDMA_SETUP_OOB);
+    failures(JZ_RDMA_SETUP_CM | JZ_RDMA_SETUP_OOB);
+    failures(JZ_RDMA_SETUP_OOB);
 
     reset();
-    jazz_engine *engine = create(JAZZ_SETUP_OOB);
+    jz_engine *engine = create(JZ_RDMA_SETUP_OOB);
     fail_open = 1;
-    struct jazz_error error;
-    CHECK(jazz_engine_prepare(engine, &error) == -EACCES);
+    struct jz_error error;
+    CHECK(jz_engine_prepare(engine, &error) == -EACCES);
     CHECK(!strcmp(error.stage, "open-device") && list_releases == 1);
     fail_open = 0;
-    CHECK(jazz_engine_prepare(engine, NULL) == 0);
+    CHECK(jz_engine_prepare(engine, NULL) == 0);
     fail_close = 1;
-    CHECK(jazz_engine_destroy(&engine, &error) == -EIO && engine);
-    CHECK(live_pds == 0 && list_releases == 1 && state(engine) == JAZZ_ENGINE_CLEANUP_REQUIRED);
+    CHECK(jz_engine_destroy(&engine, &error) == -EIO && engine);
+    CHECK(live_pds == 0 && list_releases == 1 && state(engine) == JZ_ENGINE_CLEANUP_REQUIRED);
     fail_close = 0;
-    CHECK(jazz_engine_destroy(&engine, NULL) == 0 && list_releases == 2);
+    CHECK(jz_engine_destroy(&engine, NULL) == 0 && list_releases == 2);
 
     reset();
-    struct jazz_engine_config config;
-    jazz_engine_config_init(&config);
-    CHECK(jazz_engine_create(&config, &engine, NULL) == -EINVAL && !engine);
+    struct jz_engine_config config;
+    jz_engine_config_init(&config);
+    CHECK(jz_engine_create(&config, &engine, NULL) == -EINVAL && !engine);
     const char *duplicates[] = { "fake0", "fake0" };
     config.devices = duplicates; config.device_count = 2;
-    CHECK(jazz_engine_create(&config, &engine, NULL) == -EEXIST && !engine);
+    CHECK(jz_engine_create(&config, &engine, NULL) == -EEXIST && !engine);
     const char *missing[] = { "fake0", "missing" };
     config.devices = missing;
-    CHECK(jze_engine_create(&config, &fake_ops, &engine, NULL) == 0);
-    CHECK(jazz_engine_prepare(engine, NULL) == -ENODEV && live_pds == 0);
-    CHECK(jazz_engine_destroy(&engine, NULL) == 0);
+    CHECK(jz_engine_create_with_ops(&config, &fake_ops, &engine, NULL) == 0);
+    CHECK(jz_engine_prepare(engine, NULL) == -ENODEV && live_pds == 0);
+    CHECK(jz_engine_destroy(&engine, NULL) == 0);
 
     reset();
     char name[] = "fake0";
     const char *copied[] = {name};
     config.devices = copied; config.device_count = 1;
-    CHECK(jze_engine_create(&config, &fake_ops, &engine, NULL) == 0);
+    CHECK(jz_engine_create_with_ops(&config, &fake_ops, &engine, NULL) == 0);
     name[0] = 'x';
-    CHECK(jazz_engine_prepare(engine, NULL) == 0);
-    CHECK(jazz_engine_destroy(&engine, NULL) == 0);
+    CHECK(jz_engine_prepare(engine, NULL) == 0);
+    CHECK(jz_engine_destroy(&engine, NULL) == 0);
     reset();
     return 0;
 }

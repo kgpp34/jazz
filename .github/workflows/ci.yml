@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libibverbs-dev librdmacm-dev
-      - run: cmake -S . -B build -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_BUILD_TYPE=Debug -DJAZZ_SANITIZE=ON
+      - run: cmake -S . -B build -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_BUILD_TYPE=Debug -DJZ_SANITIZE=ON
       - run: cmake --build build --parallel
-      # RDMA integration reports SKIP without JAZZ_TEST_IP and a real device.
+      # RDMA integration reports SKIP without JZ_TEST_IP and a real device.
       - run: ctest --test-dir build --output-on-failure

@@ -1,9 +1,9 @@
-#ifndef JAZZ_WIRE_H
-#define JAZZ_WIRE_H
+#ifndef JZ_WIRE_H
+#define JZ_WIRE_H
 
 #include <stddef.h>
 #include <stdint.h>
-#include "jazz/jazz.h"
+#include "jz/prototype.h"
 
 enum { JZ_FRAME_SIZE = 96, JZ_HELLO_SIZE = 40 };
 enum jz_kind { JZ_HELLO = 1, JZ_READY = 2, JZ_MESSAGE = 3 };

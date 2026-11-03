@@ -1,4 +1,4 @@
-#include "jazz/jazz.h"
+#include "jz/prototype.h"
 
 #include <errno.h>
 #include <getopt.h>
@@ -21,7 +21,7 @@ static int number(const char *text, uint64_t max, uint64_t *out)
     return 0;
 }
 
-static void report(int rc, const struct jazz_error *e)
+static void report(int rc, const struct jz_error *e)
 {
     fprintf(stderr, "error=%d stage=%s system_errno=%d wc_status=%" PRIu32 "\n",
             rc, e->stage ? e->stage : "example-validation", e->system_errno, e->wc_status);
@@ -29,8 +29,8 @@ static void report(int rc, const struct jazz_error *e)
 
 int main(int argc, char **argv)
 {
-    struct jazz_config cfg;
-    jazz_config_init(&cfg);
+    struct jz_config cfg;
+    jz_config_init(&cfg);
     const char *role = NULL;
     size_t bytes = 4096;
     unsigned pause_ms = 0;
@@ -47,8 +47,8 @@ int main(int argc, char **argv)
         uint64_t n = 0;
         switch (arg) {
         case 'm':
-            if (!strcmp(optarg, "cm")) cfg.mode = JAZZ_CM;
-            else if (!strcmp(optarg, "oob")) cfg.mode = JAZZ_OOB;
+            if (!strcmp(optarg, "cm")) cfg.mode = JZ_CM;
+            else if (!strcmp(optarg, "oob")) cfg.mode = JZ_OOB;
             else goto usage;
             break;
         case 'r': role = optarg; break;
@@ -66,81 +66,81 @@ int main(int argc, char **argv)
     }
     if (optind != argc || !role || (strcmp(role, "server") && strcmp(role, "client"))) goto usage;
     int server = !strcmp(role, "server");
-    jazz_listener *listener = NULL;
-    jazz_connection *c = NULL;
-    jazz_region *region = NULL;
-    struct jazz_error error = {0};
+    jz_listener *listener = NULL;
+    jz_connection *c = NULL;
+    jz_region *region = NULL;
+    struct jz_error error = {0};
     uint8_t *buffer = NULL;
     int rc;
     if (server) {
-        rc = jazz_listen(&cfg, &listener, &error);
+        rc = jz_listen(&cfg, &listener, &error);
         if (rc) goto cleanup;
-        printf("LISTENING %u\n", (unsigned)jazz_listener_port(listener));
+        printf("LISTENING %u\n", (unsigned)jz_listener_port(listener));
         fflush(stdout);
-        rc = jazz_accept(listener, &c, &error);
-        if (!rc) rc = jazz_listener_close(&listener, &error);
-    } else rc = jazz_connect(&cfg, &c, &error);
+        rc = jz_accept(listener, &c, &error);
+        if (!rc) rc = jz_listener_close(&listener, &error);
+    } else rc = jz_connect(&cfg, &c, &error);
     if (rc) goto cleanup;
     buffer = malloc(bytes + 32);
     if (!buffer) { rc = -ENOMEM; goto cleanup; }
     memset(buffer, 0xa5, bytes + 32);
     if (!server) for (size_t i = 0; i < bytes; ++i) buffer[i + 16] = pattern(i);
-    rc = jazz_region_register(c, buffer, bytes + 32,
-        server ? JAZZ_REMOTE_READ | JAZZ_REMOTE_WRITE : 0, &region, &error);
+    rc = jz_region_register(c, buffer, bytes + 32,
+        server ? JZ_REMOTE_READ | JZ_REMOTE_WRITE : 0, &region, &error);
     if (rc) goto cleanup;
-    uint8_t message[JAZZ_MESSAGE_MAX];
+    uint8_t message[JZ_MESSAGE_MAX];
     size_t size = 0;
-    struct jazz_remote_region remote;
+    struct jz_remote_region remote;
     if (server) {
-        if (jazz_region_unregister(&region, NULL) != -EBUSY) { rc = -EPROTO; goto cleanup; }
-        rc = jazz_region_export(region, &remote, &error);
-        if (!rc) rc = jazz_descriptor_encode(&remote, message);
-        if (!rc) rc = jazz_send_message(c, message, JAZZ_DESCRIPTOR_SIZE, &error);
+        if (jz_region_unregister(&region, NULL) != -EBUSY) { rc = -EPROTO; goto cleanup; }
+        rc = jz_region_export(region, &remote, &error);
+        if (!rc) rc = jz_descriptor_encode(&remote, message);
+        if (!rc) rc = jz_send_message(c, message, JZ_DESCRIPTOR_SIZE, &error);
         if (!rc && pause_ms) {
             struct timespec pause = { .tv_sec = pause_ms / 1000U,
                                       .tv_nsec = (long)(pause_ms % 1000U) * 1000000L };
             while (nanosleep(&pause, &pause) && errno == EINTR) {}
         }
-        if (!rc) rc = jazz_receive_message(c, message, sizeof(message), &size, &error);
+        if (!rc) rc = jz_receive_message(c, message, sizeof(message), &size, &error);
         if (!rc && (size != 1 || message[0] != 0x52)) rc = -EPROTO;
         for (size_t i = 0; !rc && i < bytes; ++i)
             if (buffer[i + 16] != pattern(i)) rc = -EBADMSG;
         for (size_t i = 0; !rc && i < 16; ++i)
             if (buffer[i] != 0xa5 || buffer[bytes + 16 + i] != 0xa5) rc = -EBADMSG;
-        if (!rc) { message[0] = 0x41; rc = jazz_send_message(c, message, 1, &error); }
+        if (!rc) { message[0] = 0x41; rc = jz_send_message(c, message, 1, &error); }
     } else {
-        rc = jazz_receive_message(c, message, sizeof(message), &size, &error);
-        if (!rc) rc = jazz_descriptor_decode(message, size, &remote);
+        rc = jz_receive_message(c, message, sizeof(message), &size, &error);
+        if (!rc) rc = jz_descriptor_decode(message, size, &remote);
         /* These failures must be rejected locally without poisoning the QP. */
         if (!rc) {
-            struct jazz_remote_region stale = remote;
+            struct jz_remote_region stale = remote;
             stale.session ^= UINT64_C(0x100);
-            if (jazz_write(c, region, 16, &stale, 16, bytes, NULL) != -ESTALE ||
-                jazz_write(c, region, 16, &remote, UINT64_MAX, bytes, NULL) != -ERANGE)
+            if (jz_write(c, region, 16, &stale, 16, bytes, NULL) != -ESTALE ||
+                jz_write(c, region, 16, &remote, UINT64_MAX, bytes, NULL) != -ERANGE)
                 rc = -EPROTO;
         }
-        if (!rc) rc = jazz_write(c, region, 16, &remote, 16, bytes, &error);
+        if (!rc) rc = jz_write(c, region, 16, &remote, 16, bytes, &error);
         if (!rc) {
             memset(buffer + 16, 0, bytes);
-            rc = jazz_read(c, region, 16, &remote, 16, bytes, &error);
+            rc = jz_read(c, region, 16, &remote, 16, bytes, &error);
         }
         for (size_t i = 0; !rc && i < bytes; ++i)
             if (buffer[i + 16] != pattern(i)) rc = -EBADMSG;
         for (size_t i = 0; !rc && i < 16; ++i)
             if (buffer[i] != 0xa5 || buffer[bytes + 16 + i] != 0xa5) rc = -EBADMSG;
-        if (!rc) { message[0] = 0x52; rc = jazz_send_message(c, message, 1, &error); }
-        if (!rc) rc = jazz_receive_message(c, message, sizeof(message), &size, &error);
+        if (!rc) { message[0] = 0x52; rc = jz_send_message(c, message, 1, &error); }
+        if (!rc) rc = jz_receive_message(c, message, sizeof(message), &size, &error);
         if (!rc && (size != 1 || message[0] != 0x41)) rc = -EPROTO;
     }
 cleanup:
     if (rc) report(rc, &error);
     /* Even a timeout must stop DMA before caller-owned storage is freed. */
-    if (c && jazz_connection_quiesce(c, &error)) { report(-EIO, &error); return 1; }
-    if (jazz_region_unregister(&region, &error)) { report(-EIO, &error); return 1; }
+    if (c && jz_connection_quiesce(c, &error)) { report(-EIO, &error); return 1; }
+    if (jz_region_unregister(&region, &error)) { report(-EIO, &error); return 1; }
     free(buffer);
-    if (jazz_connection_close(&c, &error)) { report(-EIO, &error); return 1; }
-    if (jazz_listener_close(&listener, &error)) { report(-EIO, &error); return 1; }
-    if (!rc) printf("PASS mode=%s role=%s bytes=%zu\n", cfg.mode == JAZZ_CM ? "cm" : "oob", role, bytes);
+    if (jz_connection_close(&c, &error)) { report(-EIO, &error); return 1; }
+    if (jz_listener_close(&listener, &error)) { report(-EIO, &error); return 1; }
+    if (!rc) printf("PASS mode=%s role=%s bytes=%zu\n", cfg.mode == JZ_CM ? "cm" : "oob", role, bytes);
     return rc ? 1 : 0;
 usage:
     fprintf(stderr, "Usage: %s --mode cm|oob --role server|client --local IPv4 "

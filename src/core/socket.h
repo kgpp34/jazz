@@ -1,5 +1,5 @@
-#ifndef JAZZ_SOCKET_H
-#define JAZZ_SOCKET_H
+#ifndef JZ_SOCKET_H
+#define JZ_SOCKET_H
 
 #include <netinet/in.h>
 #include <stddef.h>

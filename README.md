@@ -1,30 +1,25 @@
 # Jazz
 
-A C asynchronous memory-transfer engine targeting RoCEv2.
+An experimental Linux C17 memory-transfer library targeting RoCEv2.
 
-Focus areas include bounded resource usage, explicit memory lifetimes, batched transfers, and fault-aware completion handling.
+The `jz_` API currently provides Engine lifecycle, per-device protection domains,
+RDMA capability snapshots, and retryable cleanup. The new core does not transfer
+data yet; asynchronous workers, memory registration, GPU support, and inference
+engine integration are subsequent work.
 
-The new Linux C17 core (`jazz/engine.h`, `libjazz`) currently provides Engine lifecycle,
-explicit RDMA device preparation, per-device protection domains, capability snapshots,
-and retryable cleanup. It does not transfer data yet. The API is experimental.
-
-The historical synchronous CM/OOB Write/Read prototype is built separately as
-`jazz_prototype`; disable it with `-DJAZZ_BUILD_PROTOTYPE=OFF`.
-
-Build with CMake and rdma-core development packages, or use `Dockerfile`:
+Build with CMake and the libibverbs/librdmacm development packages:
 
 ```sh
-docker build -t jazz-dev .
-docker run --rm -v "$PWD:/work" jazz-dev sh -c \
-  'cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure'
+cmake -S . -B build -DJZ_BUILD_PROTOTYPE=OFF
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-The prototype's `jazz_roundtrip` accepts `--mode cm|oob --role server|client --local IPv4 --port PORT`
-and `--peer IPv4` on the client. Use an IP backed by an active RoCEv2 device.
-Set `JAZZ_TEST_IP` and optionally `JAZZ_TEST_DEVICE` (default `rxe0`) for device tests;
-otherwise they report SKIP.
-Docker alone does not provide RDMA: its Linux host needs an RNIC or RXE-enabled kernel
-and accessible RDMA devices. Soft-RoCE results are functional validation, not hardware benchmarks.
+Public headers are under `include/jz`; link against `libjz`.
+Code comments are in English. The API is not stable.
 
-Engine lifecycle calls must be serialized. Background workers, registered regions,
-and transfers in the new core are subsequent work; GPU and vLLM support are not implemented.
+The historical synchronous CM/OOB prototype is built separately by default as
+`jz_prototype`, with the `jz_roundtrip` example. Set `JZ_TEST_IP` and optionally
+`JZ_TEST_DEVICE` (default `rxe0`) to run device tests; otherwise they report SKIP.
+Device tests require an RNIC or an RXE-enabled Linux kernel. Docker alone does
+not provide RDMA, and Soft-RoCE tests do not establish hardware performance.

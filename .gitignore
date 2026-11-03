@@ -17,8 +17,18 @@ __pycache__/
 /results/private/
 /CMakeUserPresets.json
 
-# Keep project plans and teaching material local.
-*.md
+# Keep documentation local; only the root README is public.
+*.[mM][dD]
+*.[mM][aA][rR][kK][dD][oO][wW][nN]
+*.[rR][sS][tT]
+*.[aA][dD][oO][cC]
+*.[tT][xX][tT]
+*.[pP][dD][fF]
+*.[dD][oO][cC]
+*.[dD][oO][cC][xX]
+*.[oO][dD][tT]
+*.[rR][tT][fF]
+!CMakeLists.txt
 !/README.md
 /docs/
 /results/

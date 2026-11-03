@@ -34,7 +34,7 @@ int jz_range_valid(uint64_t size, uint64_t offset, uint64_t length)
 int jz_frame_encode(uint8_t out[JZ_FRAME_SIZE], enum jz_kind kind,
                     const void *payload, size_t length)
 {
-    if (!out || length > JAZZ_MESSAGE_MAX || (length && !payload) ||
+    if (!out || length > JZ_MESSAGE_MAX || (length && !payload) ||
         kind < JZ_HELLO || kind > JZ_MESSAGE)
         return -EINVAL;
     memset(out, 0, JZ_FRAME_SIZE);
@@ -54,7 +54,7 @@ int jz_frame_decode(const uint8_t *frame, size_t size, enum jz_kind kind,
         jz_get32(frame + 4) != 1 || jz_get32(frame + 8) != (uint32_t)kind)
         return -EPROTO;
     uint32_t n = jz_get32(frame + 12);
-    if (n > JAZZ_MESSAGE_MAX) return -EPROTO;
+    if (n > JZ_MESSAGE_MAX) return -EPROTO;
     for (size_t i = 16 + (size_t)n; i < JZ_FRAME_SIZE; ++i)
         if (frame[i] != 0) return -EPROTO;
     *payload = frame + 16;
@@ -99,14 +99,14 @@ int jz_hello_decode(const uint8_t *payload, size_t length, struct jz_hello *out)
     return 0;
 }
 
-static int descriptor_valid(const struct jazz_remote_region *r)
+static int descriptor_valid(const struct jz_remote_region *r)
 {
     return r->length && r->address <= UINT64_MAX - r->length && r->session &&
-           !(r->access & ~(uint32_t)(JAZZ_REMOTE_READ | JAZZ_REMOTE_WRITE));
+           !(r->access & ~(uint32_t)(JZ_REMOTE_READ | JZ_REMOTE_WRITE));
 }
 
-int jazz_descriptor_encode(const struct jazz_remote_region *r,
-                           uint8_t out[JAZZ_DESCRIPTOR_SIZE])
+int jz_descriptor_encode(const struct jz_remote_region *r,
+                           uint8_t out[JZ_DESCRIPTOR_SIZE])
 {
     if (!r || !out || !descriptor_valid(r)) return -EINVAL;
     jz_put64(out, r->address);
@@ -117,12 +117,12 @@ int jazz_descriptor_encode(const struct jazz_remote_region *r,
     return 0;
 }
 
-int jazz_descriptor_decode(const uint8_t *bytes, size_t length,
-                           struct jazz_remote_region *out)
+int jz_descriptor_decode(const uint8_t *bytes, size_t length,
+                           struct jz_remote_region *out)
 {
     if (!bytes || !out) return -EINVAL;
-    if (length != JAZZ_DESCRIPTOR_SIZE) return -EPROTO;
-    struct jazz_remote_region r = {
+    if (length != JZ_DESCRIPTOR_SIZE) return -EPROTO;
+    struct jz_remote_region r = {
         .address = jz_get64(bytes), .length = jz_get64(bytes + 8),
         .rkey = jz_get32(bytes + 16), .access = jz_get32(bytes + 20),
         .session = jz_get64(bytes + 24)
