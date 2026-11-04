@@ -15,8 +15,9 @@ enum jz_engine_state {
     JZ_ENGINE_CLEANUP_REQUIRED  /* Failed release retained resources; retry destroy. */
 };
 
-/* Serialize all lifecycle, configuration and query calls in this stage.
- * No threads, MRs or QPs exist yet. The ABI remains experimental.
+/* Configure/prepare/destroy require external exclusion from every other API.
+ * Memory operations document their own concurrency rules in memory.h.
+ * No transfer workers or QPs exist yet. The ABI remains experimental.
  * Initialize *out to NULL before create; it remains unchanged on failure. */
 int jz_engine_create(jz_engine **out, struct jz_error *error);
 /* Configure at least one backend before prepare. On failure, the original prepare

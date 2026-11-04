@@ -36,7 +36,8 @@ target_link_libraries(jz_runtime PUBLIC Threads::Threads)
 target_include_directories(jz_runtime PUBLIC include PRIVATE src)
 add_library(jz STATIC $<TARGET_OBJECTS:jz_runtime>
     src/transport/rdma/backend.c src/transport/rdma/device.c
-    src/transport/rdma/context_source.c src/transport/rdma/driver.c)
+    src/transport/rdma/context_source.c src/transport/rdma/driver.c
+    src/transport/rdma/registration.c src/platform/host_memory.c)
 target_include_directories(jz PUBLIC include PRIVATE src)
 target_link_libraries(jz PRIVATE PkgConfig::VERBS PkgConfig::RDMACM PUBLIC Threads::Threads)
 
@@ -50,6 +51,10 @@ if(BUILD_TESTING)
     target_include_directories(test_memory PRIVATE include src tests/unit)
     target_link_libraries(test_memory PRIVATE Threads::Threads)
     add_test(NAME memory COMMAND test_memory)
+    add_executable(test_host_memory tests/unit/test_host_memory.c)
+    target_include_directories(test_host_memory PRIVATE src tests/unit)
+    target_link_libraries(test_host_memory PRIVATE jz)
+    add_test(NAME host_memory COMMAND test_host_memory)
     add_executable(test_rdma tests/unit/test_rdma.c)
     target_include_directories(test_rdma PRIVATE src tests/unit)
     target_link_libraries(test_rdma PRIVATE jz)

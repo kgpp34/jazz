@@ -1,5 +1,7 @@
 #include "transport/rdma/internal.h"
 #include "check.h"
+#include "memory/internal.h"
+#include "runtime/engine_internal.h"
 #include <endian.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -11,12 +13,17 @@ static struct ibv_context contexts[2];
 static struct ibv_device *device_list[] = { &devices[0], &devices[1], NULL };
 static struct ibv_context *context_list[] = { &contexts[0], &contexts[1], NULL };
 static int enumerations, list_releases, opens, closes, live_pds, allocations;
+static atomic_int live_mrs, mr_calls, mr_frees;
+static int fail_mr_at, fail_mr_free, small_mr_caps;
+static size_t chunk_limit;
 static int fail_alloc_at, fail_query, fail_close, fail_pd_free, fail_open, empty, fail_list;
 static const char *const names[] = { "fake0", "fake1" };
 
 static void reset(void)
 {
-    CHECK(live_pds == 0 && opens == closes);
+    CHECK(live_pds == 0 && opens == closes && atomic_load(&live_mrs) == 0);
+    atomic_store(&mr_calls, 0); atomic_store(&mr_frees, 0);
+    fail_mr_at = fail_mr_free = small_mr_caps = 0; chunk_limit = 0;
     enumerations = list_releases = opens = closes = allocations = 0;
     fail_alloc_at = fail_query = fail_close = fail_pd_free = fail_open = empty = fail_list = 0;
     memset(contexts, 0, sizeof(contexts));
@@ -50,7 +57,6 @@ static int close_device(struct ibv_context *context)
 }
 static int query_device(struct ibv_context *context, struct ibv_device_attr *attr)
 {
-    (void)context;
     if (fail_query == 6) return -ENOSPC;
     if (fail_query == 7) return -1; /* Driver must supply EIO without errno. */
     if (fail_query == 1) { errno = EACCES; return -1; }
@@ -58,6 +64,7 @@ static int query_device(struct ibv_context *context, struct ibv_device_attr *att
         .phys_port_cnt = 1, .max_mr_size = UINT64_MAX,
         .max_qp_wr = 64, .max_cqe = 256, .max_sge = 4,
         .max_qp_rd_atom = 8, .max_qp_init_rd_atom = 4 };
+    if (small_mr_caps) attr->max_mr_size = context == &contexts[0] ? 4 : 8;
     if (fail_query == 4) attr->max_qp_rd_atom = 0;
     return 0;
 }
@@ -94,17 +101,38 @@ static struct ibv_pd *alloc_pd(struct ibv_context *context)
 }
 static int dealloc_pd(struct ibv_pd *pd)
 {
-    CHECK(live_pds > 0 && pd->context);
+    CHECK(live_pds > 0 && pd->context && atomic_load(&live_mrs) == 0);
     if (fail_pd_free == 1 || (fail_pd_free == 2 && pd->context == &contexts[1])) return EBUSY;
     --live_pds;
     free(pd);
     return 0;
 }
+static struct ibv_mr *register_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
+{
+    int n = atomic_fetch_add(&mr_calls, 1)+1;
+    if (n == fail_mr_at) { errno = ENOMEM; return NULL; }
+    CHECK(access == IBV_ACCESS_LOCAL_WRITE || access ==
+          (IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+    struct ibv_mr *mr = calloc(1, sizeof(*mr)); CHECK(mr);
+    *mr = (struct ibv_mr){.context=pd->context,.pd=pd,.addr=addr,.length=length,
+        .lkey=(uint32_t)n,.rkey=(uint32_t)n};
+    (void)atomic_fetch_add(&live_mrs,1);
+    return mr;
+}
+static int deregister_mr(struct ibv_mr *mr)
+{
+    CHECK(mr && mr->pd && atomic_load(&live_mrs)>0);
+    if (fail_mr_free) return EBUSY;
+    (void)atomic_fetch_add(&mr_frees,1);
+    (void)atomic_fetch_sub(&live_mrs,1);
+    free(mr); return 0;
+}
 static const struct jz_rdma_calls fake_ops = {
     .cm_list = cm_list, .cm_free = cm_free, .verbs_list = verbs_list,
     .verbs_free = verbs_free, .name = device_name, .open = open_device,
     .close = close_device, .query_device = query_device, .query_port = query_port,
-    .query_gid = query_gid, .alloc_pd = alloc_pd, .dealloc_pd = dealloc_pd
+    .query_gid = query_gid, .alloc_pd = alloc_pd, .dealloc_pd = dealloc_pd,
+    .reg_mr = register_mr, .dereg_mr = deregister_mr
 };
 
 static jz_engine *create(unsigned modes)
@@ -112,6 +140,7 @@ static jz_engine *create(unsigned modes)
     struct jz_rdma_config config;
     jz_rdma_config_init(&config);
     config.setup_modes = modes;
+    config.mr_chunk_bytes = chunk_limit;
     config.devices = names;
     config.device_count = 2;
     jz_engine *engine = NULL;
@@ -204,8 +233,55 @@ static void failures(unsigned modes)
     CHECK(jz_engine_destroy(&engine, NULL) == 0);
 }
 
+static void memory_registration(unsigned modes)
+{
+    char bytes[32];
+    struct jz_memory_buffer buffers[]={{bytes,16},{bytes+16,16}};
+    struct jz_registration_result results[2];
+    reset(); small_mr_caps=1;
+    jz_engine *engine=create(modes);
+    CHECK(jz_engine_prepare(engine,NULL)==0);
+    CHECK(jz_register_local_memory_batch(engine,buffers,2,NULL,results,NULL)==0);
+    CHECK(atomic_load(&live_mrs)==16); /* Common 4-byte chunks on both devices. */
+    struct jz_memory_record *record=(struct jz_memory_record *)jz_interval_find(engine->memory->root,(uintptr_t)bytes);
+    struct jz_rdma_registration *registration=record->bindings[0].resource;
+    CHECK(registration->chunk_count==4);
+    for (size_t d=0;d<2;++d) for (size_t c=0;c<4;++c) {
+        struct ibv_mr *mr=registration->mrs[d*4+c];
+        CHECK(mr->length==4 && mr->addr==bytes+c*4);
+        CHECK(mr->pd==jz_rdma_backend_find(engine)->devices[d].pd);
+    }
+    CHECK(jz_unregister_local_memory(engine,bytes+1,NULL)==-ENOENT);
+    CHECK(jz_engine_destroy(&engine,NULL)==0);
+    CHECK(atomic_load(&mr_frees)==16 && !atomic_load(&live_mrs));
+
+    /* Every creation position must roll back all prior device/chunk resources. */
+    for (int failure=1;failure<=16;++failure) {
+        reset(); chunk_limit=4; fail_mr_at=failure;
+        engine=create(modes); CHECK(jz_engine_prepare(engine,NULL)==0);
+        struct jz_error error;
+        CHECK(jz_register_local_memory_batch(engine,buffers,2,NULL,results,&error)==-ENOMEM);
+        CHECK(error.system_errno==ENOMEM && !strcmp(error.stage,"register-mr"));
+        CHECK(!atomic_load(&live_mrs) && engine->memory->count==0);
+        CHECK(results[0].state==JZ_REGISTRATION_NONE && results[1].state==JZ_REGISTRATION_NONE);
+        CHECK(jz_engine_destroy(&engine,NULL)==0);
+    }
+    reset(); chunk_limit=4; fail_mr_at=6; fail_mr_free=1;
+    engine=create(modes); CHECK(jz_engine_prepare(engine,NULL)==0);
+    struct jz_error error;
+    CHECK(jz_register_local_memory_batch(engine,buffers,2,NULL,results,&error)==-ENOMEM);
+    CHECK(atomic_load(&live_mrs)==5 && live_pds==2);
+    CHECK(jz_engine_destroy(&engine,&error)==-EBUSY && engine && live_pds==2);
+    CHECK(!strcmp(error.stage,"deregister-mr"));
+    fail_mr_free=0;
+    CHECK(jz_engine_destroy(&engine,NULL)==0 && !atomic_load(&live_mrs) && !live_pds);
+    reset();
+}
+
 int main(void)
 {
+    memory_registration(JZ_RDMA_SETUP_CM | JZ_RDMA_SETUP_OOB);
+    memory_registration(JZ_RDMA_SETUP_OOB);
     normal(JZ_RDMA_SETUP_CM | JZ_RDMA_SETUP_OOB);
     normal(JZ_RDMA_SETUP_CM);
     normal(JZ_RDMA_SETUP_OOB);

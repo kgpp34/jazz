@@ -29,6 +29,8 @@ static int backend_prepare(struct jz_backend *base, struct jz_error *error)
 static int backend_release(struct jz_backend *base, struct jz_error *error)
 {
     struct jz_rdma_backend *backend = from_base(base);
+    if (atomic_load(&backend->registration_count))
+        return jz_fail(error, EBUSY, "rdma-registrations-live");
     int first = 0;
     for (size_t i = backend->device_count; i > 0; --i) {
         struct jz_error detail = {0};
@@ -82,10 +84,13 @@ int jz_rdma_configure_with_calls(jz_engine *engine, const struct jz_rdma_config 
     if (rc) return rc;
     struct jz_rdma_backend *backend = calloc(1, sizeof(*backend));
     if (!backend) return jz_fail(error, ENOMEM, "rdma-backend-allocate");
-    backend->base = (struct jz_backend){ .kind = JZ_BACKEND_RDMA, .ops = &backend_ops };
+    backend->base = (struct jz_backend){ .kind = JZ_BACKEND_RDMA, .ops = &backend_ops,
+        .memory_ops = &jz_rdma_memory_ops };
     backend->driver.calls = calls;
     backend->device_count = config->device_count;
     backend->setup_modes = config->setup_modes;
+    backend->mr_chunk_bytes = config->mr_chunk_bytes;
+    atomic_init(&backend->registration_count, 0);
     backend->devices = calloc(config->device_count, sizeof(*backend->devices));
     if (!backend->devices) {
         backend_dispose(&backend->base);

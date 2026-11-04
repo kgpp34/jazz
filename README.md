@@ -3,9 +3,13 @@
 An experimental Linux C17 memory-transfer library targeting RoCEv2.
 
 The `jz_` API currently provides Engine lifecycle, per-device protection domains,
-RDMA capability snapshots, and retryable cleanup. The new core does not transfer
-data yet; asynchronous workers, memory registration, GPU support, and inference
-engine integration are subsequent work.
+RDMA capability snapshots, HOST memory registration, and retryable cleanup.
+Registration supports batches and common MR chunks across prepared devices.
+Check per-buffer results even when registration fails: cleanup-pending buffers
+must stay allocated until unregister or Engine destruction succeeds.
+
+The core does not transfer data yet; asynchronous workers, GPU support, and
+inference engine integration are subsequent work.
 
 Build with CMake and the libibverbs/librdmacm development packages:
 

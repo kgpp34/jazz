@@ -3,6 +3,9 @@
 #include "jz/rdma.h"
 #include "transport/backend.h"
 #include <infiniband/verbs.h>
+#include <stdatomic.h>
+#include "platform/host_memory.h"
+#include "transport/memory_backend.h"
 
 /* Raw provider ABI, replaceable only through the private test constructor.
  * The driver below converts raw errno conventions into the library contract. */
@@ -20,6 +23,8 @@ struct jz_rdma_calls {
                      struct ibv_gid_entry *, uint32_t);
     struct ibv_pd *(*alloc_pd)(struct ibv_context *);
     int (*dealloc_pd)(struct ibv_pd *);
+    struct ibv_mr *(*reg_mr)(struct ibv_pd *, void *, size_t, int);
+    int (*dereg_mr)(struct ibv_mr *);
 };
 struct jz_rdma_driver {
     const struct jz_rdma_calls *calls; /* Immutable ABI table; outlives backend. */
@@ -72,6 +77,8 @@ struct jz_rdma_backend {
     struct jz_rdma_context_source source; /* Parent reference for every device. */
     struct jz_rdma_device *devices;      /* Owned table, in configured order. */
     size_t device_count;                 /* Fixed until backend disposal. */
+    size_t mr_chunk_bytes;              /* Copied software MR ceiling, zero means device limit. */
+    atomic_size_t registration_count;   /* Backend tokens, including cleanup failures. */
     unsigned setup_modes;               /* Copied CM/OOB policy for later QP setup. */
 };
 enum { JZ_BACKEND_RDMA = 1 };
@@ -81,4 +88,13 @@ int jz_rdma_device_release(struct jz_rdma_device *, struct jz_rdma_context_sourc
 int jz_rdma_configure_with_calls(jz_engine *, const struct jz_rdma_config *,
                                  const struct jz_rdma_calls *, struct jz_error *);
 struct jz_rdma_backend *jz_rdma_backend_find(const jz_engine *);
+struct jz_rdma_registration {
+    struct jz_host_chunk *chunks; /* Common boundaries for every prepared device. */
+    size_t chunk_count;           /* Fixed once planned, before hardware calls. */
+    struct ibv_mr **mrs;          /* Device-major matrix; NULL after successful dereg. */
+};
+extern const struct jz_memory_backend_ops jz_rdma_memory_ops;
+int jz_rdma_driver_reg_mr(const struct jz_rdma_driver *, struct ibv_pd *, void *, size_t,
+    int, struct ibv_mr **, struct jz_error *);
+int jz_rdma_driver_dereg_mr(const struct jz_rdma_driver *, struct ibv_mr *, struct jz_error *);
 #endif

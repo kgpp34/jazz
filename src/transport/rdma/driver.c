@@ -8,12 +8,18 @@ static int system_query_port(struct ibv_context *context, uint8_t port,
 {
     return ibv_query_port(context, port, attr);
 }
+static struct ibv_mr *system_reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
+{
+    /* Use the base ABI: this stage has no optional extended access flags. */
+    return (ibv_reg_mr)(pd, addr, length, access);
+}
 const struct jz_rdma_calls jz_rdma_system_calls = {
     .cm_list = rdma_get_devices, .cm_free = rdma_free_devices,
     .verbs_list = ibv_get_device_list, .verbs_free = ibv_free_device_list,
     .name = ibv_get_device_name, .open = ibv_open_device, .close = ibv_close_device,
     .query_device = ibv_query_device, .query_port = system_query_port,
-    .query_gid = ibv_query_gid_ex, .alloc_pd = ibv_alloc_pd, .dealloc_pd = ibv_dealloc_pd
+    .query_gid = ibv_query_gid_ex, .alloc_pd = ibv_alloc_pd, .dealloc_pd = ibv_dealloc_pd,
+    .reg_mr = system_reg_mr, .dereg_mr = ibv_dereg_mr
 };
 
 /* Providers use positive errno or -1/errno; tolerate negative errno too.
@@ -95,4 +101,19 @@ int jz_rdma_driver_alloc_pd(const struct jz_rdma_driver *driver,
     errno = 0;
     *out = driver->calls->alloc_pd(context);
     return *out ? 0 : jz_fail(error, errno ? errno : ENOMEM, "allocate-pd");
+}
+
+int jz_rdma_driver_reg_mr(const struct jz_rdma_driver *driver, struct ibv_pd *pd,
+    void *addr, size_t length, int access, struct ibv_mr **out, struct jz_error *error)
+{
+    errno = 0;
+    *out = driver->calls->reg_mr(pd, addr, length, access);
+    return *out ? 0 : jz_fail(error, errno ? errno : ENOMEM, "register-mr");
+}
+int jz_rdma_driver_dereg_mr(const struct jz_rdma_driver *driver,
+    struct ibv_mr *mr, struct jz_error *error)
+{
+    errno = 0;
+    int rc = driver->calls->dereg_mr(mr);
+    return status(rc, error, "deregister-mr");
 }

@@ -15,6 +15,7 @@ struct jz_rdma_config {
                                  * Connection establishment is a subsequent stage. */
     const char *const *devices;  /* Explicit device names, copied during configure. */
     size_t device_count;        /* 1..DEVICE_LIMIT; duplicate names are invalid. */
+    size_t mr_chunk_bytes;      /* Optional MR chunk ceiling; zero uses device limits. */
 };
 
 /* Value snapshots taken at prepare; do not expose provider-owned pointers.
