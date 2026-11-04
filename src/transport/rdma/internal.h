@@ -19,8 +19,7 @@ struct jz_rdma_calls {
     int (*close)(struct ibv_context *context);
     int (*query_device)(struct ibv_context *, struct ibv_device_attr *);
     int (*query_port)(struct ibv_context *, uint8_t, struct ibv_port_attr *);
-    int (*query_gid)(struct ibv_context *, uint32_t, uint32_t,
-                     struct ibv_gid_entry *, uint32_t);
+    int (*query_gid)(struct ibv_context *, uint32_t, uint32_t, struct ibv_gid_entry *, uint32_t);
     struct ibv_pd *(*alloc_pd)(struct ibv_context *);
     int (*dealloc_pd)(struct ibv_pd *);
     struct ibv_mr *(*reg_mr)(struct ibv_pd *, void *, size_t, int);
@@ -30,14 +29,21 @@ struct jz_rdma_driver {
     const struct jz_rdma_calls *calls; /* Immutable ABI table; outlives backend. */
 };
 extern const struct jz_rdma_calls jz_rdma_system_calls;
-int jz_rdma_driver_cm_list(const struct jz_rdma_driver *, struct ibv_context ***, int *, struct jz_error *);
-int jz_rdma_driver_verbs_list(const struct jz_rdma_driver *, struct ibv_device ***, int *, struct jz_error *);
-int jz_rdma_driver_open(const struct jz_rdma_driver *, struct ibv_device *, struct ibv_context **, struct jz_error *);
+int jz_rdma_driver_cm_list(const struct jz_rdma_driver *, struct ibv_context ***, int *,
+                           struct jz_error *);
+int jz_rdma_driver_verbs_list(const struct jz_rdma_driver *, struct ibv_device ***, int *,
+                              struct jz_error *);
+int jz_rdma_driver_open(const struct jz_rdma_driver *, struct ibv_device *, struct ibv_context **,
+                        struct jz_error *);
 int jz_rdma_driver_close(const struct jz_rdma_driver *, struct ibv_context *, struct jz_error *);
-int jz_rdma_driver_query_device(const struct jz_rdma_driver *, struct ibv_context *, struct ibv_device_attr *, struct jz_error *);
-int jz_rdma_driver_query_port(const struct jz_rdma_driver *, struct ibv_context *, uint8_t, struct ibv_port_attr *, struct jz_error *);
-int jz_rdma_driver_query_gid(const struct jz_rdma_driver *, struct ibv_context *, uint32_t, uint32_t, struct ibv_gid_entry *, struct jz_error *);
-int jz_rdma_driver_alloc_pd(const struct jz_rdma_driver *, struct ibv_context *, struct ibv_pd **, struct jz_error *);
+int jz_rdma_driver_query_device(const struct jz_rdma_driver *, struct ibv_context *,
+                                struct ibv_device_attr *, struct jz_error *);
+int jz_rdma_driver_query_port(const struct jz_rdma_driver *, struct ibv_context *, uint8_t,
+                              struct ibv_port_attr *, struct jz_error *);
+int jz_rdma_driver_query_gid(const struct jz_rdma_driver *, struct ibv_context *, uint32_t,
+                             uint32_t, struct ibv_gid_entry *, struct jz_error *);
+int jz_rdma_driver_alloc_pd(const struct jz_rdma_driver *, struct ibv_context *, struct ibv_pd **,
+                            struct jz_error *);
 int jz_rdma_driver_dealloc_pd(const struct jz_rdma_driver *, struct ibv_pd *, struct jz_error *);
 
 struct jz_rdma_context_source;
@@ -46,55 +52,69 @@ struct jz_rdma_context_lease {
 };
 struct jz_rdma_source_ops {
     int (*prepare)(struct jz_rdma_context_source *, struct jz_error *);
-    int (*acquire)(struct jz_rdma_context_source *, const char *,
-                   struct jz_rdma_context_lease *, struct jz_error *);
-    int (*return_lease)(struct jz_rdma_context_source *,
-                        struct jz_rdma_context_lease *, struct jz_error *);
+    int (*acquire)(struct jz_rdma_context_source *, const char *, struct jz_rdma_context_lease *,
+                   struct jz_error *);
+    int (*return_lease)(struct jz_rdma_context_source *, struct jz_rdma_context_lease *,
+                        struct jz_error *);
     void (*release_list)(struct jz_rdma_context_source *);
 };
 struct jz_rdma_context_source {
     const struct jz_rdma_source_ops *ops; /* CM borrowing or verbs ownership policy. */
     const struct jz_rdma_driver *driver;  /* Borrowed from owning RDMA backend. */
     struct ibv_context **cm_contexts;     /* Retained CM reference array, if CM. */
-    struct ibv_device **verbs_devices;   /* Retained enumeration array, if verbs. */
-    int count;                          /* Entries in the active provider list. */
-    size_t leases;                      /* Contexts not yet safely returned. */
+    struct ibv_device **verbs_devices;    /* Retained enumeration array, if verbs. */
+    int count;                            /* Entries in the active provider list. */
+    size_t leases;                        /* Contexts not yet safely returned. */
 };
-void jz_rdma_source_init(struct jz_rdma_context_source *, unsigned,
-                          const struct jz_rdma_driver *);
+void jz_rdma_source_init(struct jz_rdma_context_source *, unsigned, const struct jz_rdma_driver *);
 int jz_rdma_source_release(struct jz_rdma_context_source *, struct jz_error *);
 
 struct jz_rdma_device {
     char name[JZ_RDMA_DEVICE_NAME_MAX]; /* Copied configuration; survives release. */
     struct jz_rdma_context_lease lease; /* Must outlive this device's PD. */
-    struct ibv_pd *pd;                 /* Backend-owned; never the CM default PD. */
+    struct ibv_pd *pd;                  /* Backend-owned; never the CM default PD. */
     struct jz_rdma_device_info info;    /* Valid only after successful prepare. */
     struct jz_rdma_port_info *ports;    /* Owned array, indexed by port minus one. */
 };
 struct jz_rdma_backend {
-    struct jz_backend base;              /* First member: composition for dispatch. */
-    struct jz_rdma_driver driver;        /* Raw calls remain below this boundary. */
+    struct jz_backend base;               /* First member: composition for dispatch. */
+    struct jz_rdma_driver driver;         /* Raw calls remain below this boundary. */
     struct jz_rdma_context_source source; /* Parent reference for every device. */
-    struct jz_rdma_device *devices;      /* Owned table, in configured order. */
-    size_t device_count;                 /* Fixed until backend disposal. */
-    size_t mr_chunk_bytes;              /* Copied software MR ceiling, zero means device limit. */
-    atomic_size_t registration_count;   /* Backend tokens, including cleanup failures. */
-    unsigned setup_modes;               /* Copied CM/OOB policy for later QP setup. */
+    struct jz_rdma_device *devices;       /* Owned table, in configured order. */
+    size_t device_count;                  /* Fixed until backend disposal. */
+    enum jz_rdma_registration_policy registration_policy;
+    unsigned max_registration_threads; /* Immutable per-backend helper limit. */
+    atomic_uint helpers_in_use;        /* Shared by concurrent control operations. */
+    bool pretouch;
+    uint64_t pretouch_threshold_bytes;
+    size_t mr_chunk_bytes;            /* Copied software MR ceiling, zero means device limit. */
+    atomic_size_t registration_count; /* Backend tokens, including cleanup failures. */
+    unsigned setup_modes;             /* Copied CM/OOB policy for later QP setup. */
 };
 enum { JZ_BACKEND_RDMA = 1 };
-int jz_rdma_device_prepare(struct jz_rdma_device *, struct jz_rdma_context_source *, struct jz_error *);
-int jz_rdma_device_release(struct jz_rdma_device *, struct jz_rdma_context_source *, struct jz_error *);
+int jz_rdma_device_prepare(struct jz_rdma_device *, struct jz_rdma_context_source *,
+                           struct jz_error *);
+int jz_rdma_device_release(struct jz_rdma_device *, struct jz_rdma_context_source *,
+                           struct jz_error *);
 /* The test seam never becomes part of the public ABI. */
 int jz_rdma_configure_with_calls(jz_engine *, const struct jz_rdma_config *,
                                  const struct jz_rdma_calls *, struct jz_error *);
 struct jz_rdma_backend *jz_rdma_backend_find(const jz_engine *);
 struct jz_rdma_registration {
-    struct jz_host_chunk *chunks; /* Common boundaries for every prepared device. */
-    size_t chunk_count;           /* Fixed once planned, before hardware calls. */
-    struct ibv_mr **mrs;          /* Device-major matrix; NULL after successful dereg. */
+    struct jz_host_chunk *chunks;      /* Common boundaries for every prepared device. */
+    size_t chunk_count;                /* Fixed once planned, before hardware calls. */
+    struct ibv_mr **mrs;               /* Device-major matrix; NULL after successful dereg. */
+    struct jz_host_chunk *warm_chunks; /* Temporary registration ranges, same buffer. */
+    size_t warm_count;                 /* Zero when pre-touch is not selected. */
+    struct ibv_mr **temporary;         /* Live temporary MRs also survive cleanup failure. */
+    struct jz_error *device_errors;    /* Per-device cleanup output, no shared worker writes. */
 };
 extern const struct jz_memory_backend_ops jz_rdma_memory_ops;
-int jz_rdma_driver_reg_mr(const struct jz_rdma_driver *, struct ibv_pd *, void *, size_t,
-    int, struct ibv_mr **, struct jz_error *);
+int jz_rdma_driver_reg_mr(const struct jz_rdma_driver *, struct ibv_pd *, void *, size_t, int,
+                          struct ibv_mr **, struct jz_error *);
 int jz_rdma_driver_dereg_mr(const struct jz_rdma_driver *, struct ibv_mr *, struct jz_error *);
+typedef void (*jz_rdma_work_fn)(void *, size_t);
+/* Bounded helpers plus caller work; returns only after every helper has joined. */
+void jz_rdma_run_work(struct jz_rdma_backend *, size_t count, bool parallel, jz_rdma_work_fn,
+                      void *);
 #endif

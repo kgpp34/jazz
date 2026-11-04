@@ -4,7 +4,8 @@ An experimental Linux C17 memory-transfer library targeting RoCEv2.
 
 The `jz_` API currently provides Engine lifecycle, per-device protection domains,
 RDMA capability snapshots, HOST memory registration, and retryable cleanup.
-Registration supports batches and common MR chunks across prepared devices.
+Registration supports concurrent batches, common MR chunks across prepared
+devices, bounded helper threads, optional HOST pre-touch, and NUMA location hints.
 Check per-buffer results even when registration fails: cleanup-pending buffers
 must stay allocated until unregister or Engine destruction succeeds.
 
@@ -31,3 +32,8 @@ Set `JZ_TEST_IP` and optionally `JZ_TEST_DEVICE` (default `rxe0`) to run device
 tests; otherwise they report SKIP. Device tests require an RNIC or an RXE-enabled
 Linux kernel. Docker alone does not provide RDMA, and Soft-RoCE tests do not
 establish hardware performance.
+
+`jz_reg_bench DEVICE cm|oob BYTES ITERATIONS serial|auto|parallel [warm]`
+reports registration/unregistration pair latency and process CPU time on
+already-touched HOST memory. `cm|oob` selects context ownership; no peer
+connection or payload transfer is timed.
