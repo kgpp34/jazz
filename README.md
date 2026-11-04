@@ -1,4 +1,6 @@
-# Jazz
+<p align="center">
+  <img src="assets/logo.png" alt="Jazz logo" width="164">
+</p>
 
 An experimental Linux C17 memory-transfer library targeting RoCEv2.
 

@@ -1,4 +1,5 @@
 .DS_Store
+.idea/*
 /build/
 /build-*/
 /cmake-build-*/
@@ -36,3 +37,4 @@ __pycache__/
 
 # Local IDE metadata is not part of the library.
 /.idea/
+
