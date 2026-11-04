@@ -1,13 +1,10 @@
 #ifndef JZ_ERROR_H
 #define JZ_ERROR_H
-#include <stdint.h>
 
-/* code is a negative errno. stage points to a static string that remains valid after return.
- * system_errno preserves the underlying error; wc_status is set only for CQ errors. */
+/* All functions return zero on success or a negative errno on failure. */
 struct jz_error {
-    int code;
-    const char *stage;
-    int system_errno;
-    uint32_t wc_status;
+    int code;             /* Negative errno, matching the function result. */
+    const char *stage;     /* Static diagnostic label; survives object destruction. */
+    int system_errno;     /* Positive underlying cause; zero on success. */
 };
 #endif

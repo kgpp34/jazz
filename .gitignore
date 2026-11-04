@@ -1,6 +1,7 @@
 .DS_Store
 /build/
 /build-*/
+/cmake-build-*/
 /out/
 /compile_commands.json
 *.o
@@ -32,3 +33,6 @@ __pycache__/
 !/README.md
 /docs/
 /results/
+
+# Local IDE metadata is not part of the library.
+/.idea/

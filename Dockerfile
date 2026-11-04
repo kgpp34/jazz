@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    build-essential clang cmake ninja-build pkg-config python3 \
+    build-essential clang cmake ninja-build pkg-config python3 git gdb \
     libibverbs-dev librdmacm-dev ibverbs-providers ibverbs-utils \
     rdma-core iproute2 kmod ca-certificates
 

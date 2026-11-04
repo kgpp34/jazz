@@ -1,0 +1,29 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure Jazz",
+            "type": "process",
+            "command": "cmake",
+            "args": ["-S", "${workspaceFolder}", "-B", "${workspaceFolder}/build", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Debug"],
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Jazz",
+            "type": "process",
+            "command": "cmake",
+            "args": ["--build", "${workspaceFolder}/build", "--parallel"],
+            "dependsOn": "Configure Jazz",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Test Jazz",
+            "type": "process",
+            "command": "ctest",
+            "args": ["--test-dir", "${workspaceFolder}/build", "--output-on-failure"],
+            "dependsOn": "Build Jazz",
+            "problemMatcher": []
+        }
+    ]
+}

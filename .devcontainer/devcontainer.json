@@ -1,0 +1,23 @@
+{
+    "name": "Jazz Linux C17",
+    "init": true,
+    "build": { "dockerfile": "../Dockerfile", "context": ".." },
+    "workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
+    "workspaceFolder": "/work",
+    "customizations": {
+        "vscode": {
+            "extensions": ["ms-vscode.cpptools", "ms-vscode.cmake-tools"],
+            "settings": {
+                "C_Cpp.default.compilerPath": "/usr/bin/gcc",
+                "C_Cpp.default.cStandard": "c17",
+                "C_Cpp.default.compileCommands": "/work/build/compile_commands.json",
+                "C_Cpp.default.includePath": ["/work/include", "/work/src", "/work/tests/unit"],
+                "C_Cpp.default.defines": ["_GNU_SOURCE"],
+                "cmake.buildDirectory": "/work/build",
+                "cmake.generator": "Ninja",
+                "cmake.configureOnOpen": true
+            }
+        }
+    },
+    "postCreateCommand": "cmake -S /work -B /work/build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build /work/build --parallel"
+}

@@ -11,7 +11,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Use C17 syntax; _GNU_SOURCE below controls libc declarations.
 set(CMAKE_C_EXTENSIONS OFF)
 option(JZ_SANITIZE "Enable address and undefined behavior sanitizers" OFF)
-option(JZ_BUILD_PROTOTYPE "Build the historical synchronous prototype and regression tests" ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(PkgConfig REQUIRED)
 # Use package metadata rather than hard-coded library paths.
 # libibverbs provides device/data operations; librdmacm provides CM events.
@@ -29,49 +29,28 @@ if(JZ_SANITIZE)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
-# Build the new resource core independently of prototype connection management.
-add_library(jz STATIC src/runtime/engine.c src/transport/rdma/device.c)
+# Keep generic lifecycle compilation independent of RDMA headers and libraries.
+add_library(jz_runtime OBJECT src/runtime/engine.c)
+target_include_directories(jz_runtime PUBLIC include PRIVATE src)
+add_library(jz STATIC $<TARGET_OBJECTS:jz_runtime>
+    src/transport/rdma/backend.c src/transport/rdma/device.c
+    src/transport/rdma/context_source.c src/transport/rdma/driver.c)
 target_include_directories(jz PUBLIC include PRIVATE src)
 target_link_libraries(jz PRIVATE PkgConfig::VERBS PkgConfig::RDMACM)
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(name engine engine_rdma)
-        add_executable(test_${name} tests/unit/test_${name}.c)
-        target_include_directories(test_${name} PRIVATE src tests/unit)
-        target_link_libraries(test_${name} PRIVATE jz)
-        add_test(NAME ${name} COMMAND test_${name})
-        set_tests_properties(${name} PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
-    endforeach()
-endif()
-
-if(JZ_BUILD_PROTOTYPE)
-    # Keep the synchronous prototype isolated for regression comparisons.
-    add_library(jz_prototype STATIC src/core/wire.c src/core/socket.c src/rdma/connection.c
-                           src/rdma/cm.c src/rdma/oob.c src/rdma/transfer.c)
-    # The prototype public header hides internal verbs layouts.
-    target_include_directories(jz_prototype PUBLIC include PRIVATE src)
-    target_link_libraries(jz_prototype PRIVATE PkgConfig::VERBS PkgConfig::RDMACM)
-    # The standalone example calls the prototype public API.
-    add_executable(jz_roundtrip examples/roundtrip.c)
-    target_link_libraries(jz_roundtrip PRIVATE jz_prototype)
-
-    if(BUILD_TESTING)
-        # Wire, socket and API tests need no RDMA device.
-        foreach(name wire socket api)
-            add_executable(test_${name} tests/unit/test_${name}.c)
-            target_include_directories(test_${name} PRIVATE src)
-            target_link_libraries(test_${name} PRIVATE jz_prototype)
-            add_test(NAME ${name} COMMAND test_${name})
-            set_tests_properties(${name} PROPERTIES TIMEOUT 15)
-        endforeach()
-        find_package(Python3 REQUIRED COMPONENTS Interpreter)
-        add_test(NAME rdma_roundtrip COMMAND ${Python3_EXECUTABLE}
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/roundtrip.py
-                 --binary $<TARGET_FILE:jz_roundtrip>)
-        # Without explicit JZ_TEST_IP, the script returns 77 and CTest reports SKIP.
-        # Once device tests are enabled, failures must not be hidden as skips.
-        # TIMEOUT is the outer test watchdog, not the library operation deadline.
-        set_tests_properties(rdma_roundtrip PROPERTIES TIMEOUT 150 SKIP_RETURN_CODE 77)
-    endif()
+    add_executable(test_engine tests/unit/test_engine.c $<TARGET_OBJECTS:jz_runtime>)
+    target_include_directories(test_engine PRIVATE include src tests/unit)
+    add_test(NAME engine COMMAND test_engine)
+    add_executable(test_rdma tests/unit/test_rdma.c)
+    target_include_directories(test_rdma PRIVATE src tests/unit)
+    target_link_libraries(test_rdma PRIVATE jz)
+    add_test(NAME rdma COMMAND test_rdma)
+    add_executable(test_engine_rdma tests/integration/engine_rdma.c)
+    target_include_directories(test_engine_rdma PRIVATE src tests/unit)
+    target_link_libraries(test_engine_rdma PRIVATE jz)
+    add_test(NAME engine_rdma COMMAND test_engine_rdma)
+    set_tests_properties(engine rdma engine_rdma PROPERTIES TIMEOUT 30)
+    set_tests_properties(engine_rdma PROPERTIES SKIP_RETURN_CODE 77)
 endif()

@@ -1,80 +1,77 @@
 #include "runtime/engine_internal.h"
+#include "common/error.h"
 #include <errno.h>
 #include <stdlib.h>
-#include <string.h>
 
-int jz_engine_fail(struct jz_error *error, int errnum, const char *stage)
-{
-    if (error) *error = (struct jz_error){ .code = -errnum,
-        .stage = stage, .system_errno = errnum };
-    return -errnum;
-}
+enum { JZ_BACKEND_LIMIT = 16 };
 
-void jz_engine_config_init(struct jz_engine_config *config)
+int jz_engine_create(jz_engine **out, struct jz_error *error)
 {
-    if (config) *config = (struct jz_engine_config){
-        .setup_modes = JZ_RDMA_SETUP_CM | JZ_RDMA_SETUP_OOB };
-}
-
-int jz_engine_create_with_ops(const struct jz_engine_config *config,
-                      const struct jz_rdma_device_ops *ops,
-                      jz_engine **out, struct jz_error *error)
-{
-    if (error) *error = (struct jz_error){0};
-    if (!config || !ops || !out || *out || !config->devices ||
-        !config->device_count || config->device_count > JZ_RDMA_DEVICE_LIMIT ||
-        !config->setup_modes || (config->setup_modes & ~3u))
-        return jz_engine_fail(error, EINVAL, "engine-config");
-    /* Validate the entire name set before allocation; do not borrow caller strings. */
-    for (size_t i = 0; i < config->device_count; ++i) {
-        const char *name = config->devices[i];
-        if (!name || !*name || strnlen(name, JZ_RDMA_DEVICE_NAME_MAX) == JZ_RDMA_DEVICE_NAME_MAX)
-            return jz_engine_fail(error, EINVAL, "device-name");
-        for (size_t j = 0; j < i; ++j)
-            if (!strcmp(name, config->devices[j]))
-                return jz_engine_fail(error, EEXIST, "duplicate-device");
-    }
+    jz_error_clear(error);
+    if (!out || *out) return jz_fail(error, EINVAL, "engine-output");
     jz_engine *engine = calloc(1, sizeof(*engine));
-    if (!engine) return jz_engine_fail(error, ENOMEM, "engine-allocate");
-    engine->devices = calloc(config->device_count, sizeof(*engine->devices));
-    if (!engine->devices) {
-        free(engine);
-        return jz_engine_fail(error, ENOMEM, "device-table-allocate");
-    }
+    if (!engine) return jz_fail(error, ENOMEM, "engine-allocate");
     engine->state = JZ_ENGINE_CREATED;
-    engine->setup_modes = config->setup_modes;
-    engine->device_count = config->device_count;
-    engine->ops = ops;
-    for (size_t i = 0; i < engine->device_count; ++i)
-        memcpy(engine->devices[i].name, config->devices[i], strlen(config->devices[i]) + 1);
     *out = engine;
     return 0;
 }
 
-int jz_engine_create(const struct jz_engine_config *config,
-                       jz_engine **out, struct jz_error *error)
+struct jz_backend *jz_engine_find(const jz_engine *engine, unsigned kind)
 {
-    return jz_engine_create_with_ops(config, &jz_rdma_system_ops, out, error);
+    if (!engine) return NULL;
+    for (size_t i = 0; i < engine->backend_count; ++i) {
+        struct jz_backend *backend = engine->backends[i];
+        if (backend && backend->kind == kind) return backend;
+    }
+    return NULL;
+}
+
+int jz_engine_attach(jz_engine *engine, struct jz_backend *backend, struct jz_error *error)
+{
+    jz_error_clear(error);
+    if (!engine || !backend || !backend->ops || !backend->ops->prepare ||
+        !backend->ops->release || !backend->ops->dispose)
+        return jz_fail(error, EINVAL, "backend-arguments");
+    if (engine->state != JZ_ENGINE_CREATED)
+        return jz_fail(error, EBUSY, "engine-state");
+    if (jz_engine_find(engine, backend->kind))
+        return jz_fail(error, EALREADY, "backend-duplicate");
+    if (engine->backend_count == JZ_BACKEND_LIMIT)
+        return jz_fail(error, ENOSPC, "backend-limit");
+    size_t count = engine->backend_count + 1;
+    struct jz_backend **slots = realloc(engine->backends, count * sizeof(*slots));
+    if (!slots) return jz_fail(error, ENOMEM, "backend-table-allocate");
+    slots[engine->backend_count] = backend;
+    engine->backends = slots;
+    engine->backend_count = count;
+    return 0;
 }
 
 int jz_engine_prepare(jz_engine *engine, struct jz_error *error)
 {
-    if (error) *error = (struct jz_error){0};
-    if (!engine) return jz_engine_fail(error, EINVAL, "engine-null");
+    jz_error_clear(error);
+    if (!engine) return jz_fail(error, EINVAL, "engine-null");
     if (engine->state != JZ_ENGINE_CREATED)
-        return jz_engine_fail(error, engine->state == JZ_ENGINE_READY ? EALREADY : EBUSY,
-                        "engine-state");
+        return jz_fail(error, engine->state == JZ_ENGINE_READY ? EALREADY : EBUSY,
+                       "engine-state");
+    if (!engine->backend_count) return jz_fail(error, ENODEV, "no-backend");
     engine->state = JZ_ENGINE_PREPARING;
-    int rc = jz_rdma_devices_prepare(engine, error);
-    if (!rc) {
-        engine->state = JZ_ENGINE_READY;
-        return 0;
+    for (size_t i = 0; i < engine->backend_count; ++i) {
+        struct jz_backend *backend = engine->backends[i];
+        int rc = backend->ops->prepare(backend, error);
+        if (!rc) continue;
+        /* Include the failing backend: it may already own partial resources.
+         * Keep the original prepare error even if rollback also fails. */
+        int pending = 0;
+        for (size_t j = i + 1; j > 0; --j) {
+            struct jz_backend *previous = engine->backends[j - 1];
+            if (previous->ops->release(previous, NULL)) pending = 1;
+        }
+        engine->state = pending ? JZ_ENGINE_CLEANUP_REQUIRED : JZ_ENGINE_CREATED;
+        return rc;
     }
-    /* Rollback must not overwrite the first preparation error. State and destroy
- * retries expose cleanup failures. */
-    engine->state = jz_rdma_devices_release(engine, NULL) ?
-        JZ_ENGINE_CLEANUP_REQUIRED : JZ_ENGINE_CREATED;
-    return rc;
+    engine->state = JZ_ENGINE_READY;
+    return 0;
 }
 
 int jz_engine_get_state(const jz_engine *engine, enum jz_engine_state *out)
@@ -84,49 +81,29 @@ int jz_engine_get_state(const jz_engine *engine, enum jz_engine_state *out)
     return 0;
 }
 
-static int query_check(const jz_engine *engine, size_t index,
-                        const void *out, struct jz_error *error)
+int jz_engine_destroy(jz_engine **handle, struct jz_error *error)
 {
-    if (error) *error = (struct jz_error){0};
-    if (!engine || !out) return jz_engine_fail(error, EINVAL, "query-arguments");
-    if (engine->state != JZ_ENGINE_READY)
-        return jz_engine_fail(error, EAGAIN, "device-not-ready");
-    if (index >= engine->device_count) return jz_engine_fail(error, ERANGE, "device-index");
-    return 0;
-}
-
-int jz_rdma_query_device(const jz_engine *engine, size_t index,
-                             struct jz_rdma_device_info *out, struct jz_error *error)
-{
-    int rc = query_check(engine, index, out, error);
-    if (!rc) *out = engine->devices[index].info;
-    return rc;
-}
-
-int jz_rdma_query_port(const jz_engine *engine, size_t index, uint8_t port,
-                           struct jz_rdma_port_info *out, struct jz_error *error)
-{
-    int rc = query_check(engine, index, out, error);
-    if (rc) return rc;
-    const struct jz_rdma_device *device = &engine->devices[index];
-    if (!port || port > device->info.port_count)
-        return jz_engine_fail(error, ERANGE, "port-index");
-    *out = device->ports[port - 1u];
-    return 0;
-}
-
-int jz_engine_destroy(jz_engine **engine, struct jz_error *error)
-{
-    if (error) *error = (struct jz_error){0};
-    if (!engine) return jz_engine_fail(error, EINVAL, "engine-pointer");
-    if (!*engine) return 0;
-    int rc = jz_rdma_devices_release(*engine, error);
-    if (rc) {
-        (*engine)->state = JZ_ENGINE_CLEANUP_REQUIRED;
-        return rc;
+    jz_error_clear(error);
+    if (!handle) return jz_fail(error, EINVAL, "engine-pointer");
+    jz_engine *engine = *handle;
+    if (!engine) return 0;
+    int first = 0;
+    engine->state = JZ_ENGINE_CLEANUP_REQUIRED;
+    for (size_t i = engine->backend_count; i > 0; --i) {
+        struct jz_backend *backend = engine->backends[i - 1];
+        if (!backend) continue; /* A previous destroy attempt already disposed it. */
+        struct jz_error detail = {0};
+        int rc = backend->ops->release(backend, &detail);
+        if (rc) {
+            if (!first) { first = rc; if (error) *error = detail; }
+            continue; /* Other independent backends can still be cleaned up. */
+        }
+        backend->ops->dispose(backend);
+        engine->backends[i - 1] = NULL;
     }
-    free((*engine)->devices);
-    free(*engine);
-    *engine = NULL;
+    if (first) return first;
+    free(engine->backends);
+    free(engine);
+    *handle = NULL;
     return 0;
 }

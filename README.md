@@ -10,7 +10,7 @@ engine integration are subsequent work.
 Build with CMake and the libibverbs/librdmacm development packages:
 
 ```sh
-cmake -S . -B build -DJZ_BUILD_PROTOTYPE=OFF
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
@@ -18,8 +18,12 @@ ctest --test-dir build --output-on-failure
 Public headers are under `include/jz`; link against `libjz`.
 Code comments are in English. The API is not stable.
 
-The historical synchronous CM/OOB prototype is built separately by default as
-`jz_prototype`, with the `jz_roundtrip` example. Set `JZ_TEST_IP` and optionally
-`JZ_TEST_DEVICE` (default `rxe0`) to run device tests; otherwise they report SKIP.
-Device tests require an RNIC or an RXE-enabled Linux kernel. Docker alone does
-not provide RDMA, and Soft-RoCE tests do not establish hardware performance.
+For VS Code on macOS, open this repository folder and run **Dev Containers:
+Reopen in Container**. The included configuration builds Linux dependencies and
+supplies IntelliSense with CMake's compilation database. Use **Build Jazz** or
+**Test Jazz** from Run Task.
+
+Set `JZ_TEST_IP` and optionally `JZ_TEST_DEVICE` (default `rxe0`) to run device
+tests; otherwise they report SKIP. Device tests require an RNIC or an RXE-enabled
+Linux kernel. Docker alone does not provide RDMA, and Soft-RoCE tests do not
+establish hardware performance.
