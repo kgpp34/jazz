@@ -1,5 +1,6 @@
 #include "runtime/engine_internal.h"
 #include "common/error.h"
+#include "memory/internal.h"
 #include <errno.h>
 #include <stdlib.h>
 
@@ -11,6 +12,8 @@ int jz_engine_create(jz_engine **out, struct jz_error *error)
     if (!out || *out) return jz_fail(error, EINVAL, "engine-output");
     jz_engine *engine = calloc(1, sizeof(*engine));
     if (!engine) return jz_fail(error, ENOMEM, "engine-allocate");
+    int rc = jz_memory_registry_create(&engine->memory, error);
+    if (rc) { free(engine); return rc; }
     engine->state = JZ_ENGINE_CREATED;
     *out = engine;
     return 0;
@@ -32,6 +35,8 @@ int jz_engine_attach(jz_engine *engine, struct jz_backend *backend, struct jz_er
     if (!engine || !backend || !backend->ops || !backend->ops->prepare ||
         !backend->ops->release || !backend->ops->dispose)
         return jz_fail(error, EINVAL, "backend-arguments");
+    if (backend->memory_ops && (!backend->memory_ops->register_batch || !backend->memory_ops->release_batch))
+        return jz_fail(error, EINVAL, "backend-memory-operations");
     if (engine->state != JZ_ENGINE_CREATED)
         return jz_fail(error, EBUSY, "engine-state");
     if (jz_engine_find(engine, backend->kind))
@@ -89,6 +94,8 @@ int jz_engine_destroy(jz_engine **handle, struct jz_error *error)
     if (!engine) return 0;
     int first = 0;
     engine->state = JZ_ENGINE_CLEANUP_REQUIRED;
+    int memory_rc = jz_memory_release_all(engine, error);
+    if (memory_rc) return memory_rc; /* Live MRs retain every parent backend/PD. */
     for (size_t i = engine->backend_count; i > 0; --i) {
         struct jz_backend *backend = engine->backends[i - 1];
         if (!backend) continue; /* A previous destroy attempt already disposed it. */
@@ -102,6 +109,7 @@ int jz_engine_destroy(jz_engine **handle, struct jz_error *error)
         engine->backends[i - 1] = NULL;
     }
     if (first) return first;
+    jz_memory_registry_dispose(engine->memory);
     free(engine->backends);
     free(engine);
     *handle = NULL;

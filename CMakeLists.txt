@@ -13,6 +13,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 option(JZ_SANITIZE "Enable address and undefined behavior sanitizers" OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
 # Use package metadata rather than hard-coded library paths.
 # libibverbs provides device/data operations; librdmacm provides CM events.
 pkg_check_modules(VERBS REQUIRED IMPORTED_TARGET libibverbs)
@@ -30,19 +31,25 @@ if(JZ_SANITIZE)
 endif()
 
 # Keep generic lifecycle compilation independent of RDMA headers and libraries.
-add_library(jz_runtime OBJECT src/runtime/engine.c)
+add_library(jz_runtime OBJECT src/runtime/engine.c src/memory/interval.c src/memory/registry.c)
+target_link_libraries(jz_runtime PUBLIC Threads::Threads)
 target_include_directories(jz_runtime PUBLIC include PRIVATE src)
 add_library(jz STATIC $<TARGET_OBJECTS:jz_runtime>
     src/transport/rdma/backend.c src/transport/rdma/device.c
     src/transport/rdma/context_source.c src/transport/rdma/driver.c)
 target_include_directories(jz PUBLIC include PRIVATE src)
-target_link_libraries(jz PRIVATE PkgConfig::VERBS PkgConfig::RDMACM)
+target_link_libraries(jz PRIVATE PkgConfig::VERBS PkgConfig::RDMACM PUBLIC Threads::Threads)
 
 include(CTest)
 if(BUILD_TESTING)
     add_executable(test_engine tests/unit/test_engine.c $<TARGET_OBJECTS:jz_runtime>)
     target_include_directories(test_engine PRIVATE include src tests/unit)
+    target_link_libraries(test_engine PRIVATE Threads::Threads)
     add_test(NAME engine COMMAND test_engine)
+    add_executable(test_memory tests/unit/test_memory.c $<TARGET_OBJECTS:jz_runtime>)
+    target_include_directories(test_memory PRIVATE include src tests/unit)
+    target_link_libraries(test_memory PRIVATE Threads::Threads)
+    add_test(NAME memory COMMAND test_memory)
     add_executable(test_rdma tests/unit/test_rdma.c)
     target_include_directories(test_rdma PRIVATE src tests/unit)
     target_link_libraries(test_rdma PRIVATE jz)

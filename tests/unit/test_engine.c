@@ -56,9 +56,9 @@ static enum jz_engine_state state(jz_engine *engine)
 static void lifecycle(int prepare_failure, int rollback_failure)
 {
     trace_count = 0;
-    struct fixture a = {.base = {101, &ops_a}, .token = 1};
-    struct fixture b = {.base = {202, &ops_b}, .token = 2};
-    struct fixture c = {.base = {303, &ops_a}, .token = 3};
+    struct fixture a = {.base = {.kind = 101, .ops = &ops_a}, .token = 1};
+    struct fixture b = {.base = {.kind = 202, .ops = &ops_b}, .token = 2};
+    struct fixture c = {.base = {.kind = 303, .ops = &ops_a}, .token = 3};
     jz_engine *engine = NULL;
     struct jz_error error;
     CHECK(jz_engine_create(&engine, &error) == 0 && !error.code);
@@ -120,7 +120,7 @@ int main(void)
     CHECK(jz_engine_attach(engine, NULL, NULL) == -EINVAL);
     CHECK(jz_engine_destroy(&engine, NULL) == 0);
     /* Destruction of a never-prepared backend also uses the release contract. */
-    struct fixture f = {.base = {101, &ops_a}, .token = 1};
+    struct fixture f = {.base = {.kind = 101, .ops = &ops_a}, .token = 1};
     CHECK(jz_engine_create(&engine, NULL) == 0);
     CHECK(jz_engine_attach(engine, &f.base, NULL) == 0);
     CHECK(jz_engine_destroy(&engine, NULL) == 0);
