@@ -4,6 +4,7 @@
 #include "transport/backend.h"
 #include <infiniband/verbs.h>
 #include <stdatomic.h>
+#include <pthread.h>
 #include "platform/host_memory.h"
 #include "transport/memory_backend.h"
 
@@ -89,7 +90,12 @@ struct jz_rdma_backend {
     uint64_t pretouch_threshold_bytes;
     size_t mr_chunk_bytes;            /* Copied software MR ceiling, zero means device limit. */
     atomic_size_t registration_count; /* Backend tokens, including cleanup failures. */
-    unsigned setup_modes;             /* Copied CM/OOB policy for later QP setup. */
+    unsigned setup_modes;             /* Enabled CM/OOB setup modes. */
+    pthread_mutex_t control_lock;     /* Serializes lazy service publication and API entry. */
+    bool control_lock_live;
+    struct jz_rdma_control *control; /* Owned until all endpoints/listeners retire. */
+    size_t max_connections;
+    size_t max_listeners;
 };
 enum { JZ_BACKEND_RDMA = 1 };
 int jz_rdma_device_prepare(struct jz_rdma_device *, struct jz_rdma_context_source *,

@@ -2,21 +2,30 @@
   <img src="assets/logo.png" alt="Jazz logo" width="164">
 </p>
 
-An experimental Linux C17 memory-transfer library targeting RoCEv2.
+Jazz is an experimental data-transfer engine written in C17 for AI inference
+and training workloads. The initial focus is inference data movement, including
+KV-cache migration and weight distribution.
 
-The `jz_` API currently provides Engine lifecycle, per-device protection domains,
-RDMA capability snapshots, HOST memory registration, and retryable cleanup.
-Registration supports concurrent batches, common MR chunks across prepared
-devices, bounded helper threads, optional HOST pre-touch, and NUMA location hints.
-Check per-buffer results even when registration fails: cleanup-pending buffers
-must stay allocated until unregister or Engine destruction succeeds.
+The core works with opaque memory ranges. Model-specific KV layouts and
+framework lifecycles belong in adapters. The architecture is intended to grow
+across host/GPU memory, local and network transports, and topology-aware paths.
 
-The control layer includes peer lifecycle and bounded passive-admission
-bookkeeping with timed waits. Network binding and peer connection setup are
-not implemented yet.
+The current Linux implementation focuses on the RDMA/RoCEv2 backend:
 
-The core does not transfer data yet; asynchronous workers, GPU support, and
-inference engine integration are subsequent work.
+- Engine lifecycle, device capabilities, HOST memory registration across devices,
+  concurrent batches, bounded registration helpers, and retryable cleanup.
+- Real RDMA_CM and TCP OOB binding and RC connection setup, background control,
+  bounded passive admission, handshake deadlines, and safe shutdown.
+- RXE two-process integration tests with private RDMA READ/WRITE/SEND probes.
+
+Public payload submission, remote memory descriptors, and the transfer
+WorkerPool are still under development. GPU memory/GPUDirect RDMA, TCP payload,
+shared memory, GPU peer-copy/staging paths, and a vLLM JazzConnector are planned
+extensions. Each explicit connection currently uses one RC QP; connection-cache
+coalescing is future work.
+
+Numeric local IPs must match a typed RoCEv2 GID on the selected device.
+Cleanup-pending buffers must stay allocated until cleanup succeeds.
 
 Build with CMake and the libibverbs/librdmacm development packages:
 

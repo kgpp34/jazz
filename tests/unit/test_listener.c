@@ -386,6 +386,12 @@ static void invalid_arguments(void)
 
 int main(void)
 {
+    jz_listener *pinned = create(1, 1);
+    jz_listener *owner = pinned;
+    jz_listener_retain(owner);
+    finish(&pinned);
+    CHECK(info(owner).state == JZ_LISTENER_CLOSED);
+    jz_listener_release(owner);
     invalid_arguments();
     allocation_failures();
     limits_and_delivery();

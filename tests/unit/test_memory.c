@@ -71,7 +71,8 @@ static void release_batch(struct jz_backend *base, struct jz_memory_job *jobs, s
         (void)atomic_fetch_sub(&fake->live, 1);
     }
 }
-static const struct jz_backend_ops lifecycle = {prepare, release, dispose};
+static const struct jz_backend_ops lifecycle = {
+    .prepare = prepare, .release = release, .dispose = dispose};
 static const struct jz_memory_backend_ops memory_ops = {register_batch, release_batch};
 static jz_engine *create(struct fake *fake, unsigned kind)
 {

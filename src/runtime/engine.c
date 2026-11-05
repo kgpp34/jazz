@@ -94,6 +94,13 @@ int jz_engine_destroy(jz_engine **handle, struct jz_error *error)
     if (!engine) return 0;
     int first = 0;
     engine->state = JZ_ENGINE_CLEANUP_REQUIRED;
+    for (size_t i = 0; i < engine->backend_count; ++i) {
+        struct jz_backend *backend = engine->backends[i];
+        if (backend && backend->ops->quiesce) {
+            int rc = backend->ops->quiesce(backend, error);
+            if (rc) return rc;
+        }
+    }
     int memory_rc = jz_memory_release_all(engine, error);
     if (memory_rc) return memory_rc; /* Live MRs retain every parent backend/PD. */
     for (size_t i = engine->backend_count; i > 0; --i) {

@@ -6,6 +6,10 @@
  * publishes CONNECTING only after synchronization primitives are initialized.
  * No Engine, QP, thread, network connection, or remote view is created here. */
 int jz_peer_create(jz_peer **out, struct jz_error *error);
+/* Control ownership outlives public handle release during a CLOSED publication.
+ * Retain only an already-live reference; release never performs hardware cleanup. */
+void jz_peer_retain(jz_peer *);
+void jz_peer_release(jz_peer *);
 
 /* Publish protocol/path readiness only while CONNECTING. The same lock used by
  * request_close prevents late readiness from reviving a stopping session. */

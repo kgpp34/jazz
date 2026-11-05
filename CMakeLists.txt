@@ -39,6 +39,9 @@ add_library(jz STATIC $<TARGET_OBJECTS:jz_runtime>
     src/transport/rdma/backend.c src/transport/rdma/device.c
     src/transport/rdma/context_source.c src/transport/rdma/driver.c
     src/transport/rdma/registration.c src/transport/rdma/registration_work.c
+    src/transport/rdma/connection.c src/transport/rdma/control.c
+    src/transport/rdma/endpoint.c src/transport/rdma/setup_cm.c
+    src/transport/rdma/setup_oob.c src/transport/rdma/connection_wire.c
     src/platform/host_memory.c)
 target_include_directories(jz PUBLIC include PRIVATE src)
 target_link_libraries(jz PRIVATE PkgConfig::VERBS PkgConfig::RDMACM PUBLIC Threads::Threads)
@@ -48,6 +51,17 @@ target_link_libraries(jz_reg_bench PRIVATE jz)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(test_connection_wire tests/unit/test_connection_wire.c)
+    target_include_directories(test_connection_wire PRIVATE include src tests/unit)
+    target_link_libraries(test_connection_wire PRIVATE jz)
+    add_test(NAME connection_wire COMMAND test_connection_wire)
+    add_executable(test_connection_rdma tests/integration/connection_rdma.c)
+    target_include_directories(test_connection_rdma PRIVATE include src tests/unit)
+    target_link_libraries(test_connection_rdma PRIVATE jz)
+    target_link_options(test_connection_rdma PRIVATE -Wl,--wrap=ibv_destroy_qp
+        -Wl,--wrap=rdma_destroy_id -Wl,--wrap=rdma_connect)
+    add_test(NAME connection_rdma COMMAND test_connection_rdma)
+    set_tests_properties(connection_rdma PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77)
     add_executable(test_listener tests/unit/test_listener.c $<TARGET_OBJECTS:jz_runtime>)
     target_include_directories(test_listener PRIVATE include src tests/unit)
     target_link_libraries(test_listener PRIVATE Threads::Threads)

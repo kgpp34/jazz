@@ -7,8 +7,8 @@
 extern "C" {
 #endif
 
-/* Opaque passive admission owner. Transport binding will publish listeners in a
- * subsequent stage; these operations alone do not bind sockets or accept RDMA. */
+/* Opaque passive admission owner. RDMA listen binds and publishes this handle;
+ * these generic operations do not expose sockets or CM identifiers. */
 typedef struct jz_listener jz_listener;
 enum jz_listener_state {
     JZ_LISTENER_LISTENING, /* Logical admission is open. */
@@ -45,8 +45,9 @@ int jz_listener_request_close(jz_listener *, struct jz_error *);
 int jz_listener_wait_closed(jz_listener *, uint32_t timeout_ms, struct jz_error *);
 
 /* CLOSED only, otherwise -EBUSY with the handle retained. Success sets *handle
- * to NULL. NULL handles are already destroyed. Exclude all concurrent uses,
- * including control-owner callbacks and waiters, before calling destroy. */
+ * to NULL. NULL handles are already destroyed. Exclude concurrent application
+ * users and waiters. Internal control pins keep storage live until callbacks
+ * return, independently of the caller's handle release. */
 int jz_listener_destroy(jz_listener **handle, struct jz_error *);
 
 #ifdef __cplusplus

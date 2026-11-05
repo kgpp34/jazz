@@ -12,6 +12,7 @@ struct fixture {
     int live;
     int prepares, releases, disposals;
     int prepare_error, release_error;
+    int quiesce_error, quiesces;
     unsigned token;
 };
 static unsigned trace[64];
@@ -45,8 +46,20 @@ static void dispose_fixture(struct jz_backend *base)
     CHECK(!f->live && !f->disposals);
     ++f->disposals;
 }
-static const struct jz_backend_ops ops_a = {prepare_a, release_fixture, dispose_fixture};
-static const struct jz_backend_ops ops_b = {prepare_b, release_fixture, dispose_fixture};
+static const struct jz_backend_ops ops_a = {
+    .prepare = prepare_a, .release = release_fixture, .dispose = dispose_fixture};
+static const struct jz_backend_ops ops_b = {
+    .prepare = prepare_b, .release = release_fixture, .dispose = dispose_fixture};
+static int quiesce_fixture(struct jz_backend *base, struct jz_error *error)
+{
+    struct fixture *f = (struct fixture *)base;
+    ++f->quiesces;
+    return f->quiesce_error ? jz_fail(error, f->quiesce_error, "fixture-quiesce") : 0;
+}
+static const struct jz_backend_ops stopping_ops = {.prepare = prepare_a,
+                                                   .release = release_fixture,
+                                                   .dispose = dispose_fixture,
+                                                   .quiesce = quiesce_fixture};
 static enum jz_engine_state state(jz_engine *engine)
 {
     enum jz_engine_state result;
@@ -106,6 +119,17 @@ static void lifecycle(int prepare_failure, int rollback_failure)
 }
 int main(void)
 {
+    jz_engine *stopping = NULL;
+    struct fixture active = {
+        .base = {.kind = 111, .ops = &stopping_ops}, .token = 1, .quiesce_error = EBUSY};
+    CHECK(jz_engine_create(&stopping, NULL) == 0);
+    CHECK(jz_engine_attach(stopping, &active.base, NULL) == 0);
+    CHECK(jz_engine_prepare(stopping, NULL) == 0);
+    CHECK(jz_engine_destroy(&stopping, NULL) == -EBUSY && stopping);
+    CHECK(active.live && !active.releases && !active.disposals && active.quiesces == 1);
+    active.quiesce_error = 0;
+    CHECK(jz_engine_destroy(&stopping, NULL) == 0 && !stopping);
+    CHECK(active.quiesces == 2 && active.releases == 1 && active.disposals == 1);
     lifecycle(0, 0);
     lifecycle(1, 0);
     lifecycle(1, 1);

@@ -279,6 +279,12 @@ static void invalid_arguments(void)
 
 int main(void)
 {
+    jz_peer *pinned = create_peer();
+    jz_peer *owner = pinned;
+    jz_peer_retain(owner);
+    finish_peer(&pinned);
+    CHECK(info(owner).state == JZ_PEER_CLOSED);
+    jz_peer_release(owner);
     allocation_failure();
     invalid_arguments();
     lifecycle();

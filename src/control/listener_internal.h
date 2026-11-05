@@ -14,6 +14,8 @@ struct jz_listener_ticket {
  * limits are explicit and nonzero. max_pending may exceed capacity, but every
  * admission must satisfy both limits. Output remains unchanged on failure. */
 int jz_listener_create(jz_listener **out, size_t max_pending, size_t capacity, struct jz_error *);
+void jz_listener_retain(jz_listener *);
+void jz_listener_release(jz_listener *);
 
 /* Reserve result capacity before creating a candidate. *peer must be NULL.
  * The returned peer is BORROWED by the setup owner, not an application handle.

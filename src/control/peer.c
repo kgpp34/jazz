@@ -3,10 +3,12 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <time.h>
 
 struct jz_peer {
+    atomic_size_t references; /* Public handle plus control-owner pins. */
     pthread_mutex_t lock;     /* Protects the entire info snapshot and wait predicates. */
     pthread_cond_t changed;   /* Monotonic timed waits; broadcast on state publication. */
     struct jz_peer_info info; /* Independent outcome, cleanup diagnostic and state. */
@@ -49,6 +51,7 @@ int jz_peer_create(jz_peer **out, struct jz_error *error)
         return jz_fail(error, rc, "peer-condition-init");
     }
     peer->info.state = JZ_PEER_CONNECTING;
+    atomic_init(&peer->references, 1);
     *out = peer;
     return 0;
 }
@@ -214,9 +217,20 @@ int jz_peer_destroy(jz_peer **handle, struct jz_error *error)
     pthread_mutex_unlock(&peer->lock);
     if (!closed)
         return jz_fail(error, EBUSY, "peer-destroy-state");
+    *handle = NULL;
+    jz_peer_release(peer);
+    return 0;
+}
+
+void jz_peer_retain(jz_peer *peer)
+{
+    atomic_fetch_add_explicit(&peer->references, 1, memory_order_relaxed);
+}
+void jz_peer_release(jz_peer *peer)
+{
+    if (atomic_fetch_sub_explicit(&peer->references, 1, memory_order_acq_rel) != 1)
+        return;
     pthread_cond_destroy(&peer->changed);
     pthread_mutex_destroy(&peer->lock);
     free(peer);
-    *handle = NULL;
-    return 0;
 }

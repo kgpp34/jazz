@@ -1,6 +1,7 @@
 #ifndef JZ_RDMA_H
 #define JZ_RDMA_H
 #include "jz/engine.h"
+#include "jz/listener.h"
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,8 +18,8 @@ enum jz_rdma_registration_policy {
     JZ_RDMA_REG_PARALLEL /* Permit helpers; unavailable slots run in the caller. */
 };
 struct jz_rdma_config {
-    unsigned setup_modes;       /* CM | OOB by default; selects context ownership now.
-                                 * Connection establishment is a subsequent stage. */
+    unsigned setup_modes;       /* Enabled setup modes, CM | OOB by default. CM uses
+                                 * retained librdmacm contexts and shared device PDs. */
     const char *const *devices; /* Explicit device names, copied during configure. */
     size_t device_count;        /* 1..DEVICE_LIMIT; duplicate names are invalid. */
     size_t mr_chunk_bytes;      /* Optional MR chunk ceiling; zero uses device limits. */
@@ -27,7 +28,66 @@ struct jz_rdma_config {
     bool pretouch;                     /* Default true; temporarily register HOST chunks first. */
     uint64_t pretouch_threshold_bytes; /* Default 4 GiB; 0 forces eligible small tests.
                                         * AUTO additionally requires at least four CPUs. */
+    size_t max_connections;            /* Per-Engine live control/endpoint slots; default 128. */
+    size_t max_listeners;              /* Per-Engine bound listen sources; default 8. */
 };
+
+/* Numeric IPs only. One endpoint currently contains one RC QP; this is not an
+ * architectural limit on future QP pools. Strings are consumed before return. */
+struct jz_rdma_listen_options {
+    const char *local_ip;     /* Required concrete IP belonging to the selected device. */
+    uint16_t service_port;    /* Zero requests an ephemeral port. */
+    enum jz_rdma_setup setup; /* Exactly CM or OOB, enabled in Engine configuration. */
+    size_t device_index;      /* Index in configured device order. */
+    uint8_t port;             /* RDMA port, default 1. */
+    int gid_index;            /* -1 selects a typed RoCEv2 GID matching local_ip. */
+    uint32_t timeout_ms;      /* Total handshake deadline, default 5000. */
+    size_t max_pending;       /* Handshake quota, default 16. */
+    size_t capacity;          /* Unclaimed/retiring result quota, default 32. */
+};
+struct jz_rdma_connect_options {
+    const char *local_ip;     /* Required concrete source IP, never an arbitrary GID. */
+    const char *remote_ip;    /* Numeric destination IP, same address family as local_ip. */
+    uint16_t service_port;    /* Destination's CM or OOB service port; nonzero. */
+    enum jz_rdma_setup setup; /* Exactly one enabled mode. */
+    size_t device_index;      /* Configured local device selector, default 0. */
+    uint8_t port;             /* Local RDMA port, default 1. */
+    int gid_index;            /* Typed local RoCEv2 GID selector; -1 matches local_ip. */
+    uint32_t timeout_ms;      /* Total setup budget, independent of wait_ready timeout. */
+};
+struct jz_rdma_bound_address {
+    char ip[64]; /* Numeric address, copied value. */
+    uint16_t service_port;
+    enum jz_rdma_setup setup;
+};
+struct jz_rdma_connection_info {
+    enum jz_rdma_setup setup;
+    size_t device_index;
+    uint32_t local_qpn;
+    uint32_t remote_qpn;
+    uint32_t mtu;                /* Negotiated bytes. */
+    uint8_t local_instance[16];  /* Per-Engine control-service identity, not authentication. */
+    uint8_t remote_instance[16]; /* Instance negotiated by this session. */
+    uint64_t attempt;            /* Initiator-local unique proposal. */
+    uint64_t session;            /* Responder-local unique acceptance. */
+};
+
+void jz_rdma_listen_options_init(struct jz_rdma_listen_options *);
+void jz_rdma_connect_options_init(struct jz_rdma_connect_options *);
+/* READY Engine only. Listen returns a genuinely bound source. Connect returns
+ * an admitted CONNECTING handle; background control drives both setup modes.
+ * Require *out == NULL. Failed setup after publication is reported by the Peer.
+ * Different connect calls create independent sessions, including opposite
+ * directions; connection-cache coalescing is not provided in this version. */
+int jz_rdma_listen(jz_engine *, const struct jz_rdma_listen_options *, jz_listener **out,
+                   struct jz_error *);
+int jz_rdma_connect(jz_engine *, const struct jz_rdma_connect_options *, jz_peer **out,
+                    struct jz_error *);
+int jz_rdma_listener_address(jz_engine *, const jz_listener *, struct jz_rdma_bound_address *,
+                             struct jz_error *);
+/* Snapshot of a live, protocol-ready endpoint; does not retain a QP. */
+int jz_rdma_peer_query(jz_engine *, const jz_peer *, struct jz_rdma_connection_info *,
+                       struct jz_error *);
 
 /* Value snapshots taken at prepare; do not expose provider-owned pointers.
  * Capability limits are ceilings, not a promise that combined allocations fit. */

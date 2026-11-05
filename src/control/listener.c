@@ -2,6 +2,7 @@
 #include "control/peer_internal.h"
 #include "common/wait.h"
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 
 enum slot_state { SLOT_FREE, SLOT_PENDING, SLOT_QUEUED, SLOT_RETIRING, SLOT_REAPING };
@@ -12,8 +13,9 @@ struct incoming {
     size_t next_free;      /* Free-list link; capacity is the end sentinel. */
 };
 struct jz_listener {
-    pthread_mutex_t lock;   /* Admission, publication, delivery and close linearize here. */
-    pthread_cond_t changed; /* Monotonic delivery/closed wait notification. */
+    atomic_size_t references; /* Public handle and bound-source control ownership. */
+    pthread_mutex_t lock;     /* Admission, publication, delivery and close linearize here. */
+    pthread_cond_t changed;   /* Monotonic delivery/closed wait notification. */
     struct jz_listener_info info;
     struct incoming *slots; /* Fixed capacity, including unreclaimed failures. */
     size_t *queue;          /* FIFO of published slot indices, allocated at construction. */
@@ -59,6 +61,7 @@ int jz_listener_create(jz_listener **out, size_t max_pending, size_t capacity,
         goto failed_mutex;
     listener->info = (struct jz_listener_info){
         .state = JZ_LISTENER_LISTENING, .max_pending = max_pending, .capacity = capacity};
+    atomic_init(&listener->references, 1);
     for (size_t i = 0; i < capacity; ++i)
         listener->slots[i].next_free = i + 1;
     *out = listener;
@@ -433,11 +436,22 @@ int jz_listener_destroy(jz_listener **handle, struct jz_error *error)
     pthread_mutex_unlock(&listener->lock);
     if (!closed)
         return jz_fail(error, EBUSY, "listener-destroy-state");
+    *handle = NULL;
+    jz_listener_release(listener);
+    return 0;
+}
+
+void jz_listener_retain(jz_listener *listener)
+{
+    atomic_fetch_add_explicit(&listener->references, 1, memory_order_relaxed);
+}
+void jz_listener_release(jz_listener *listener)
+{
+    if (atomic_fetch_sub_explicit(&listener->references, 1, memory_order_acq_rel) != 1)
+        return;
     pthread_cond_destroy(&listener->changed);
     pthread_mutex_destroy(&listener->lock);
     free(listener->queue);
     free(listener->slots);
     free(listener);
-    *handle = NULL;
-    return 0;
 }

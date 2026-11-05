@@ -13,10 +13,13 @@ struct jz_backend_ops {
     /* Software memory only; called after successful release or before prepare.
      * Never hide a fallible hardware cleanup operation in this callback. */
     void (*dispose)(struct jz_backend *);
+    /* Stop connections before generic memory teardown. Optional for backends
+     * without autonomous activity. Failure retains every parent resource. */
+    int (*quiesce)(struct jz_backend *, struct jz_error *);
 };
 struct jz_backend {
-    unsigned kind;                    /* Opaque lookup key; no runtime type switch. */
-    const struct jz_backend_ops *ops;  /* Static lifecycle strategy, outlives owner. */
+    unsigned kind;                                  /* Opaque lookup key; no runtime type switch. */
+    const struct jz_backend_ops *ops;               /* Static lifecycle strategy, outlives owner. */
     const struct jz_memory_backend_ops *memory_ops; /* Optional registration strategy. */
 };
 #endif

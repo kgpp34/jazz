@@ -8,8 +8,8 @@ extern "C" {
 #endif
 
 /* A caller-owned handle to one communication session. Copying the pointer does
- * not retain it. Connection setup will publish handles in a subsequent stage;
- * this header does not provide a public constructor or imply a live QP. */
+ * not retain it. RDMA listen/connect publish handles through the RDMA extension;
+ * the generic lifecycle does not expose transport resources. */
 typedef struct jz_peer jz_peer;
 
 enum jz_peer_state {
@@ -49,8 +49,9 @@ int jz_peer_request_close(jz_peer *peer, struct jz_error *error);
 int jz_peer_wait_closed(jz_peer *peer, uint32_t timeout_ms, struct jz_error *error);
 
 /* CLOSED only; otherwise -EBUSY, retaining *peer. NULL is already destroyed.
- * The caller must exclude every concurrent use, including waiters and control
- * owner callbacks. Success frees the handle and sets *peer to NULL. */
+ * Exclude concurrent application uses, including waiters. Internal control pins
+ * survive handle release until their callbacks return. Success sets *peer to
+ * NULL and frees software storage once the final control pin is released. */
 int jz_peer_destroy(jz_peer **peer, struct jz_error *error);
 
 #ifdef __cplusplus

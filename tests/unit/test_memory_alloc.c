@@ -66,7 +66,8 @@ static void unreg(struct jz_backend *b, struct jz_memory_job *jobs, size_t count
             --live;
         }
 }
-static const struct jz_backend_ops lifecycle = {prepare, release, dispose};
+static const struct jz_backend_ops lifecycle = {
+    .prepare = prepare, .release = release, .dispose = dispose};
 static const struct jz_memory_backend_ops memory_ops = {reg, unreg};
 int main(void)
 {

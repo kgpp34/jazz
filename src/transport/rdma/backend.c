@@ -1,4 +1,5 @@
 #include "transport/rdma/internal.h"
+#include "transport/rdma/control.h"
 #include "runtime/engine_internal.h"
 #include "common/error.h"
 #include <errno.h>
@@ -32,6 +33,9 @@ static int backend_prepare(struct jz_backend *base, struct jz_error *error)
 static int backend_release(struct jz_backend *base, struct jz_error *error)
 {
     struct jz_rdma_backend *backend = from_base(base);
+    int control_rc = jz_rdma_control_shutdown(backend, error);
+    if (control_rc)
+        return control_rc;
     if (atomic_load(&backend->registration_count))
         return jz_fail(error, EBUSY, "rdma-registrations-live");
     int first = 0;
@@ -54,10 +58,18 @@ static void backend_dispose(struct jz_backend *base)
     struct jz_rdma_backend *backend = from_base(base);
     /* Runtime resources have already been released. No fallible work here. */
     free(backend->devices);
+    if (backend->control_lock_live)
+        pthread_mutex_destroy(&backend->control_lock);
     free(backend);
 }
-static const struct jz_backend_ops backend_ops = {
-    .prepare = backend_prepare, .release = backend_release, .dispose = backend_dispose};
+static int backend_quiesce(struct jz_backend *base, struct jz_error *error)
+{
+    return jz_rdma_control_shutdown(from_base(base), error);
+}
+static const struct jz_backend_ops backend_ops = {.prepare = backend_prepare,
+                                                  .release = backend_release,
+                                                  .dispose = backend_dispose,
+                                                  .quiesce = backend_quiesce};
 void jz_rdma_config_init(struct jz_rdma_config *config)
 {
     if (config)
@@ -66,7 +78,9 @@ void jz_rdma_config_init(struct jz_rdma_config *config)
                                     .registration_policy = JZ_RDMA_REG_AUTO,
                                     .max_registration_threads = 8,
                                     .pretouch = true,
-                                    .pretouch_threshold_bytes = UINT64_C(4) * 1024 * 1024 * 1024};
+                                    .pretouch_threshold_bytes = UINT64_C(4) * 1024 * 1024 * 1024,
+                                    .max_connections = 128,
+                                    .max_listeners = 8};
 }
 static int validate_config(const struct jz_rdma_config *config, struct jz_error *error)
 {
@@ -75,7 +89,8 @@ static int validate_config(const struct jz_rdma_config *config, struct jz_error 
         config->device_count > JZ_RDMA_DEVICE_LIMIT || !config->setup_modes ||
         (config->setup_modes & ~valid_modes) || config->max_registration_threads > 64 ||
         config->registration_policy < JZ_RDMA_REG_AUTO ||
-        config->registration_policy > JZ_RDMA_REG_PARALLEL)
+        config->registration_policy > JZ_RDMA_REG_PARALLEL || !config->max_connections ||
+        config->max_connections > 4096 || !config->max_listeners || config->max_listeners > 64)
         return jz_fail(error, EINVAL, "rdma-config");
     for (size_t i = 0; i < config->device_count; ++i) {
         const char *name = config->devices[i];
@@ -113,6 +128,14 @@ int jz_rdma_configure_with_calls(jz_engine *engine, const struct jz_rdma_config 
     backend->max_registration_threads = config->max_registration_threads;
     backend->pretouch = config->pretouch;
     backend->pretouch_threshold_bytes = config->pretouch_threshold_bytes;
+    backend->max_connections = config->max_connections;
+    backend->max_listeners = config->max_listeners;
+    int lock_rc = pthread_mutex_init(&backend->control_lock, NULL);
+    if (lock_rc) {
+        free(backend);
+        return jz_fail(error, lock_rc, "control-api-mutex");
+    }
+    backend->control_lock_live = true;
     atomic_init(&backend->helpers_in_use, 0);
     atomic_init(&backend->registration_count, 0);
     backend->devices = calloc(config->device_count, sizeof(*backend->devices));
