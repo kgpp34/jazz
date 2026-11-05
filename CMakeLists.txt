@@ -32,7 +32,7 @@ endif()
 
 # Keep generic lifecycle compilation independent of RDMA headers and libraries.
 add_library(jz_runtime OBJECT src/runtime/engine.c src/memory/interval.c src/memory/registry.c
-    src/control/peer.c)
+    src/control/peer.c src/control/listener.c)
 target_link_libraries(jz_runtime PUBLIC Threads::Threads)
 target_include_directories(jz_runtime PUBLIC include PRIVATE src)
 add_library(jz STATIC $<TARGET_OBJECTS:jz_runtime>
@@ -48,6 +48,11 @@ target_link_libraries(jz_reg_bench PRIVATE jz)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(test_listener tests/unit/test_listener.c $<TARGET_OBJECTS:jz_runtime>)
+    target_include_directories(test_listener PRIVATE include src tests/unit)
+    target_link_libraries(test_listener PRIVATE Threads::Threads)
+    target_link_options(test_listener PRIVATE -Wl,--wrap=calloc)
+    add_test(NAME listener COMMAND test_listener)
     add_executable(test_peer tests/unit/test_peer.c $<TARGET_OBJECTS:jz_runtime>)
     target_include_directories(test_peer PRIVATE include src tests/unit)
     target_link_libraries(test_peer PRIVATE Threads::Threads)
@@ -82,7 +87,7 @@ if(BUILD_TESTING)
     target_include_directories(test_engine_rdma PRIVATE src tests/unit)
     target_link_libraries(test_engine_rdma PRIVATE jz)
     add_test(NAME engine_rdma COMMAND test_engine_rdma)
-    set_tests_properties(peer engine memory memory_alloc host_memory registration_work rdma engine_rdma
+    set_tests_properties(listener peer engine memory memory_alloc host_memory registration_work rdma engine_rdma
         PROPERTIES TIMEOUT 30)
     set_tests_properties(engine_rdma PROPERTIES SKIP_RETURN_CODE 77)
 endif()

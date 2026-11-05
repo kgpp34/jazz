@@ -1,7 +1,6 @@
 #include "control/peer_internal.h"
-#include "common/error.h"
+#include "common/wait.h"
 #include <errno.h>
-#include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -152,34 +151,6 @@ int jz_peer_set_closed(jz_peer *peer, struct jz_error *error)
     return rc;
 }
 
-/* Build one absolute deadline per wait, rather than extending it after every
- * wakeup. Linux time_t is signed; check addition even on a 32-bit build. */
-static int wait_deadline(uint32_t timeout_ms, struct timespec *deadline, struct jz_error *error)
-{
-    _Static_assert(sizeof(time_t) <= sizeof(uintmax_t), "time_t must fit uintmax_t");
-    if (clock_gettime(CLOCK_MONOTONIC, deadline))
-        return jz_fail(error, errno, "peer-clock");
-    uintmax_t seconds = timeout_ms / UINT32_C(1000);
-    long nanos = (long)(timeout_ms % UINT32_C(1000)) * 1000000L + deadline->tv_nsec;
-    if (nanos >= 1000000000L) {
-        ++seconds;
-        nanos -= 1000000000L;
-    }
-    const uintmax_t maximum = (UINTMAX_C(1) << (sizeof(time_t) * CHAR_BIT - 1U)) - 1U;
-    if (deadline->tv_sec < 0 || (uintmax_t)deadline->tv_sec > maximum - seconds)
-        return jz_fail(error, EOVERFLOW, "peer-deadline");
-    deadline->tv_sec += (time_t)seconds;
-    deadline->tv_nsec = nanos;
-    return 0;
-}
-
-/* A cancellation point must not strand the mutex. POSIX reacquires it before
- * running cleanup handlers when pthread_cond_timedwait is cancelled. */
-static void unlock_wait(void *lock)
-{
-    pthread_mutex_unlock(lock);
-}
-
 static bool wait_pending(const jz_peer *peer, bool closing)
 {
     return closing ? peer->info.state != JZ_PEER_CLOSED : peer->info.state == JZ_PEER_CONNECTING;
@@ -191,11 +162,11 @@ static int wait_peer(jz_peer *peer, uint32_t timeout_ms, bool closing, struct jz
     if (!peer)
         return jz_fail(error, EINVAL, "peer-null");
     struct timespec deadline;
-    int rc = wait_deadline(timeout_ms, &deadline, error);
+    int rc = jz_wait_deadline(timeout_ms, &deadline, error);
     if (rc)
         return rc;
     pthread_mutex_lock(&peer->lock);
-    pthread_cleanup_push(unlock_wait, &peer->lock);
+    pthread_cleanup_push(jz_wait_unlock, &peer->lock);
     while (wait_pending(peer, closing)) {
         int wait_rc = pthread_cond_timedwait(&peer->changed, &peer->lock, &deadline);
         /* Timeout can race with a state publication. Recheck the predicate

@@ -11,6 +11,10 @@ devices, bounded helper threads, optional HOST pre-touch, and NUMA location hint
 Check per-buffer results even when registration fails: cleanup-pending buffers
 must stay allocated until unregister or Engine destruction succeeds.
 
+The control layer includes peer lifecycle and bounded passive-admission
+bookkeeping with timed waits. Network binding and peer connection setup are
+not implemented yet.
+
 The core does not transfer data yet; asynchronous workers, GPU support, and
 inference engine integration are subsequent work.
 
